@@ -18,14 +18,12 @@ Flask + SQLite, server-rendered, with a small amount of plain JavaScript (no fra
 ## Quick start
 
 ```bash
-docker compose up -d --build        # http://127.0.0.1:5000
+cp .env.example .env                # put your Cloudflare tunnel token in .env (see "Public access")
+docker compose up -d --build        # app on http://127.0.0.1:5000
 ```
 
-The compose file also starts a Cloudflare tunnel, so it needs a token first (see [Public access](#public-access)). To run just the app:
-
-```bash
-docker compose up -d --build tracker
-```
+`docker-compose.yml` also defines the Cloudflare tunnel, and Compose refuses to start **any** service while `CF_TUNNEL_TOKEN` is unset.
+To try the app without a tunnel, put any placeholder value in `.env`, or use the no-Docker route below.
 
 First-run login: any seeded NRP (`5054251001` … `5054251051`) with password `123456`, then pick a new one.
 
@@ -34,7 +32,9 @@ First-run login: any seeded NRP (`5054251001` … `5054251051`) with password `1
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-DATA_DIR=./data python app.py        # http://127.0.0.1:5000  (add --debug via `flask --app app run --debug --port 5050`)
+DATA_DIR=./data python app.py        # http://127.0.0.1:5000
+# or, with auto-reload while developing:
+DATA_DIR=./data flask --app app run --debug --port 5050
 ```
 
 ## Configuration
