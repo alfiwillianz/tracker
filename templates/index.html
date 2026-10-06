@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Assignments - tracker{% endblock %}
+{% block boxclass %}page{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>Assignments</h1>
+        <p class="muted">Shared by the whole class. Ticking a circle is just for you.</p>
+    </div>
+    <a href="{{ url_for('add') }}" class="button primary">+ Add</a>
+</div>
+
+<div class="stats">
+    <div class="stat {{ 'bad' if stats.overdue }}"><b>{{ stats.overdue }}</b><span>overdue</span></div>
+    <div class="stat {{ 'warn' if stats.week }}"><b>{{ stats.week }}</b><span>due this week</span></div>
+    <div class="stat good"><b>{{ stats.done }}</b><span>done</span></div>
+</div>
+
+<div class="seg">
+    {% for key, label in [('todo', 'To do'), ('done', 'Done'), ('all', 'All')] %}
+    <a href="{{ url_for('index', view=key, course=course or None) }}" class="{{ 'active' if view == key }}">{{ label }} <span>{{ counts[key] }}</span></a>
+    {% endfor %}
+</div>
+
+{% if courses|length > 1 %}
+<div class="chips">
+    <a href="{{ url_for('index', view=view) }}" class="chip {{ 'active' if not course }}">All courses</a>
+    {% for c in courses %}
+    <a href="{{ url_for('index', view=view, course=c) }}" class="chip {{ 'active' if c == course }}">{{ c }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% for g in groups %}
+<h2 class="group">{{ g.label }} <span>{{ g.rows|length }}</span></h2>
+{% for a in g.rows %}
+<article class="project-tile card {{ a.tone }}">
+    <form method="post" action="{{ url_for('toggle', aid=a.id) }}" class="check-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit" class="check {{ 'on' if a.done }}" title="{{ 'Mark as not done' if a.done else 'Mark as done' }}" aria-label="{{ 'Mark as not done' if a.done else 'Mark as done' }}">✓</button>
+    </form>
+    <div class="card-body">
+        <div class="card-top">
+            <h3>{{ a.title }}</h3>
+            <div class="due">
+                <span class="pill {{ a.tone }}">{{ 'Done' if a.done else a.rel }}</span>
+                <small>{{ a.dl.strftime('%a, %d %b · %H:%M') }}</small>
+            </div>
+        </div>
+        <div class="meta">
+            <a href="{{ url_for('index', view=view, course=a.course) }}" class="chip small">{{ a.course }}</a>
+            <span>added by {{ a.created_by }}</span>
+        </div>
+        {% if a.description %}
+            {% if a.description|length > 160 %}
+            <details class="desc">
+                <summary>{{ a.description[:120] }}…</summary>
+                <p>{{ a.description }}</p>
+            </details>
+            {% else %}
+            <p class="desc">{{ a.description }}</p>
+            {% endif %}
+        {% endif %}
+        {% if a.link %}<p class="link"><a href="{{ a.link }}" target="_blank" rel="noopener noreferrer">{{ a.link|replace('https://', '')|replace('http://', '')|truncate(60, True) }} ↗</a></p>{% endif %}
+        {% if a.created_by == me or is_admin %}
+        <div class="actions">
+            {% if a.created_by == me %}<a href="{{ url_for('edit', aid=a.id) }}">Edit</a>{% endif %}
+            <form method="post" action="{{ url_for('delete', aid=a.id) }}" class="inline" onsubmit="return confirm('Delete this assignment for everyone?')">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button type="submit" class="linkbtn del">Delete{% if a.created_by != me %} (admin){% endif %}</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</article>
+{% endfor %}
+{% else %}
+<div class="empty">
+    <p>{{ "You're all caught up 🎉" if view == 'todo' and not course else "Nothing here." }}</p>
+    <a href="{{ url_for('add') }}">Add an assignment</a>
+</div>
+{% endfor %}
+
+<div class="account">
+    <span>{{ me }}</span>
+    <span>•</span>
+    <a href="{{ url_for('change_password') }}">Change password</a>
+    <span>•</span>
+    <form method="post" action="{{ url_for('logout') }}" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit" class="linkbtn">Log out</button>
+    </form>
+</div>
+{% endblock %}

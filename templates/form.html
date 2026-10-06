@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit" if editing else "Add" }} assignment - tracker{% endblock %}
+{% block boxclass %}welcome-box narrow{% endblock %}
+{% block content %}
+<h1>{{ "Edit assignment" if editing else "Add assignment" }}</h1>
+<form method="post" class="form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="text" name="course" placeholder="Course (e.g. Signal Processing)" maxlength="80" value="{{ a.get('course', '') }}" required autofocus>
+    <input type="text" name="title" placeholder="Title" maxlength="150" value="{{ a.get('title', '') }}" required>
+    <textarea name="description" placeholder="Details (optional)" maxlength="2000">{{ a.get('description', '') }}</textarea>
+    <input type="text" name="link" placeholder="Link (optional)" maxlength="500" value="{{ a.get('link', '') }}">
+    <div class="row">
+        <div>
+            <label class="muted" for="date">Deadline date</label>
+            <input type="date" id="date" name="date" value="{{ a.get('date') or a.get('deadline', '')[:10] }}" required>
+        </div>
+        <div>
+            <label class="muted" for="time">Time (24h)</label>
+            <input type="text" id="time" name="time" placeholder="23:59" inputmode="numeric" maxlength="5" autocomplete="off" value="{{ a.get('time') if a.get('time') is not none else a.get('deadline', '')[11:16] }}">
+        </div>
+    </div>
+    <div class="button-container">
+        <button type="submit">{{ "Save" if editing else "Add" }}</button>
+        <a href="{{ url_for('index') }}" class="button">Cancel</a>
+    </div>
+</form>
+{% endblock %}

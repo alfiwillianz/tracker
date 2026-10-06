@@ -1,0 +1,17 @@
+# secrets
+.env
+
+# runtime data (sqlite db, session secret)
+data/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# editor / os
+.vscode/
+.idea/
+*.swp
+.DS_Store
