@@ -736,19 +736,37 @@ def group_view(gid):
     group = get_group(gid)
     all_nrps = {r["nrp"] for r in db().execute("SELECT nrp FROM group_members WHERE group_id = ?", (gid,))}
     member_count = len(all_nrps)
-    pages = max(1, -(-member_count // MEMBERS_PER_PAGE))
+
+    # filter: every word must appear in "name nrp" (case-insensitive); LIKE wildcards are escaped
+    q = request.args.get("q", "").strip()[:60]
+    where, params = "m.group_id = ?", [gid]
+    for term in q.lower().split():
+        where += " AND LOWER(COALESCE(u.name, '') || ' ' || m.nrp) LIKE ? ESCAPE '\\'"
+        params.append("%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+    shown_count = db().execute(
+        f"SELECT COUNT(*) FROM group_members m JOIN users u ON u.nrp = m.nrp WHERE {where}", params
+    ).fetchone()[0]
+
+    pages = max(1, -(-shown_count // MEMBERS_PER_PAGE))
     page = min(max(request.args.get("page", 1, type=int), 1), pages)
     members = db().execute(
-        """SELECT m.nrp, m.is_admin FROM group_members m JOIN users u ON u.nrp = m.nrp
-           WHERE m.group_id = ? ORDER BY m.is_admin DESC, COALESCE(u.name, u.nrp) COLLATE NOCASE
-           LIMIT ? OFFSET ?""",
-        (gid, MEMBERS_PER_PAGE, (page - 1) * MEMBERS_PER_PAGE)).fetchall()
+        f"""SELECT m.nrp, m.is_admin FROM group_members m JOIN users u ON u.nrp = m.nrp
+            WHERE {where} ORDER BY m.is_admin DESC, COALESCE(u.name, u.nrp) COLLATE NOCASE
+            LIMIT ? OFFSET ?""",
+        params + [MEMBERS_PER_PAGE, (page - 1) * MEMBERS_PER_PAGE]).fetchall()
     total = db().execute(
         "SELECT COUNT(*) FROM assignments WHERE group_id = ?", (gid,)).fetchone()[0]
     return render_template("group.html", group=group, members=members, total=total,
                            manage=can_manage(group), is_member=current_user() in all_nrps,
                            people=people(all_nrps), member_count=member_count,
+                           shown_count=shown_count, q=q,
                            page=page, pages=pages, first=(page - 1) * MEMBERS_PER_PAGE + 1)
+
+
+def members_url(gid):
+    """Back to the member list, keeping the current page and filter."""
+    return url_for("group_view", gid=gid, page=request.form.get("page", type=int),
+                   q=request.form.get("q") or None, _anchor="members")
 
 
 @app.route("/groups/<int:gid>/join", methods=["POST"])
@@ -799,12 +817,12 @@ def group_remove(gid):
         abort(403)
     if is_group_admin(gid, nrp) and admin_count(gid) <= 1:
         flash("This is the only admin. Make someone else admin first.")
-        return redirect(url_for("group_view", gid=gid, page=request.form.get("page", type=int)))
+        return redirect(members_url(gid))
     db().execute("DELETE FROM group_members WHERE group_id = ? AND nrp = ?", (gid, nrp))
     db().commit()
     if leaving:
         return redirect(url_for("groups"))
-    return redirect(url_for("group_view", gid=gid, page=request.form.get("page", type=int), _anchor="members"))
+    return redirect(members_url(gid))
 
 
 @app.route("/groups/<int:gid>/role", methods=["POST"])
@@ -819,11 +837,11 @@ def group_role(gid):
         abort(404)
     if not make_admin and is_group_admin(gid, nrp) and admin_count(gid) <= 1:
         flash("A group needs at least one admin.")
-        return redirect(url_for("group_view", gid=gid, page=request.form.get("page", type=int)))
+        return redirect(members_url(gid))
     db().execute("UPDATE group_members SET is_admin = ? WHERE group_id = ? AND nrp = ?",
                  (int(make_admin), gid, nrp))
     db().commit()
-    return redirect(url_for("group_view", gid=gid, page=request.form.get("page", type=int), _anchor="members"))
+    return redirect(members_url(gid))
 
 
 @app.route("/groups/<int:gid>/delete", methods=["POST"])

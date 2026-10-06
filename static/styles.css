@@ -689,3 +689,25 @@ dialog.confirm[open] { animation: confirm-in 0.15s ease-out; }
 .pager .pages a:hover { background: rgba(255, 255, 255, 0.08); color: #fff; text-decoration: none; }
 .pager .pages a.active { background: rgba(74, 144, 226, 0.18); color: var(--blue); }
 .pager .pages .off { color: #555; }
+
+/* ---------- member filter ---------- */
+.member-filter { margin: 0 0 8px; }
+.member-filter input {
+    width: 100%;
+    margin: 0;
+    padding: 9px 14px 9px 38px;
+    border-radius: 999px;
+    border: 1px solid #333;
+    background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 14px center;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    -webkit-appearance: none;
+    appearance: none;
+    transition: border-color 0.15s ease;
+}
+.member-filter input::placeholder { color: #aaa; }
+.member-filter input:focus { outline: none; border-color: var(--blue); }
+.member-filter input::-webkit-search-cancel-button { filter: invert(0.6); }
+.members li.empty-row { display: block; padding: 18px 0; text-align: center; }
+.match-count { margin: 10px 0 0; font-size: 13px; }
