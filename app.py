@@ -2,7 +2,7 @@ import os
 import re
 import secrets
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -17,6 +17,23 @@ os.makedirs(DATA_DIR, exist_ok=True)
 NRP_PREFIX = "5054251"
 NRP_COUNT = 51  # 5054251001 .. 5054251051
 DEFAULT_PASSWORD = "123456"
+DEFAULT_GROUP = "RKA"
+REMOVED_USERS = {"5054251034"}  # purged from the DB entirely (see init_db), never re-seeded
+STUDENTS_FILE = os.path.join(os.path.dirname(__file__), "students.tsv")
+
+
+def load_students():
+    """nrp -> name from students.tsv (tab separated). Missing file just means no names."""
+    out = {}
+    try:
+        with open(STUDENTS_FILE, encoding="utf-8") as f:
+            for line in f:
+                nrp, _, name = line.rstrip("\n").partition("\t")
+                if nrp.strip() and name.strip():
+                    out[nrp.strip()] = name.strip()
+    except FileNotFoundError:
+        pass
+    return out
 ADMINS = set(os.environ.get("ADMINS", f"{NRP_PREFIX}028").split(","))
 
 app = Flask(__name__)
@@ -70,17 +87,38 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             nrp TEXT PRIMARY KEY,
             password_hash TEXT NOT NULL,
-            must_change INTEGER NOT NULL DEFAULT 1
+            must_change INTEGER NOT NULL DEFAULT 1,
+            name TEXT
         );
+        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE IF NOT EXISTS assignments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            course TEXT NOT NULL,
             title TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
             link TEXT NOT NULL DEFAULT '',
             deadline TEXT NOT NULL,
             created_by TEXT NOT NULL REFERENCES users(nrp),
+            created_at TEXT NOT NULL,
+            group_id INTEGER REFERENCES class_groups(id)
+        );
+        CREATE TABLE IF NOT EXISTS class_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            created_by TEXT REFERENCES users(nrp),
+            is_default INTEGER NOT NULL DEFAULT 0,
+            is_public INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS group_members (
+            group_id INTEGER NOT NULL REFERENCES class_groups(id) ON DELETE CASCADE,
+            nrp TEXT NOT NULL REFERENCES users(nrp),
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (group_id, nrp)
+        );
+        CREATE TABLE IF NOT EXISTS assignment_recipients (
+            assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+            nrp TEXT NOT NULL REFERENCES users(nrp),
+            PRIMARY KEY (assignment_id, nrp)
         );
         CREATE TABLE IF NOT EXISTS completions (
             nrp TEXT NOT NULL REFERENCES users(nrp),
@@ -93,8 +131,50 @@ def init_db():
         default_hash = generate_password_hash(DEFAULT_PASSWORD)
         conn.executemany(
             "INSERT INTO users (nrp, password_hash, must_change) VALUES (?, ?, 1)",
-            [(f"{NRP_PREFIX}{i:03d}", default_hash) for i in range(1, NRP_COUNT + 1)],
+            [(f"{NRP_PREFIX}{i:03d}", default_hash) for i in range(1, NRP_COUNT + 1)
+             if f"{NRP_PREFIX}{i:03d}" not in REMOVED_USERS],
         )
+    # names (students.tsv is the source of truth)
+    if "name" not in [r[1] for r in conn.execute("PRAGMA table_info(users)")]:
+        conn.execute("ALTER TABLE users ADD COLUMN name TEXT")
+    conn.executemany("UPDATE users SET name = ? WHERE nrp = ?",
+                     [(name, nrp) for nrp, name in load_students().items()])
+    # migrate DBs created before groups existed
+    migrated = "group_id" not in [r[1] for r in conn.execute("PRAGMA table_info(assignments)")]
+    if migrated:
+        conn.execute("ALTER TABLE assignments ADD COLUMN group_id INTEGER REFERENCES class_groups(id)")
+    rka = conn.execute("SELECT id FROM class_groups WHERE is_default = 1").fetchone()
+    if rka is None:  # everyone starts in RKA
+        cur = conn.execute(
+            "INSERT INTO class_groups (name, created_by, is_default, created_at) VALUES (?, NULL, 1, ?)",
+            (DEFAULT_GROUP, datetime.now().isoformat(timespec="seconds")),
+        )
+        rka = (cur.lastrowid,)
+        conn.execute("INSERT INTO group_members (group_id, nrp) SELECT ?, nrp FROM users", (rka[0],))
+    # purge removed accounts: their memberships, picks, completions and own assignments
+    for nrp in REMOVED_USERS:
+        conn.execute("DELETE FROM completions WHERE nrp = ? OR assignment_id IN "
+                     "(SELECT id FROM assignments WHERE created_by = ?)", (nrp, nrp))
+        conn.execute("DELETE FROM assignment_recipients WHERE nrp = ? OR assignment_id IN "
+                     "(SELECT id FROM assignments WHERE created_by = ?)", (nrp, nrp))
+        conn.execute("DELETE FROM assignments WHERE created_by = ?", (nrp,))
+        conn.execute("DELETE FROM group_members WHERE nrp = ?", (nrp,))
+        conn.execute("UPDATE class_groups SET created_by = NULL WHERE created_by = ?", (nrp,))
+        conn.execute("DELETE FROM users WHERE nrp = ?", (nrp,))
+    if migrated:
+        conn.execute("UPDATE assignments SET group_id = ? WHERE group_id IS NULL", (rka[0],))
+    if "is_public" not in [r[1] for r in conn.execute("PRAGMA table_info(class_groups)")]:
+        conn.execute("ALTER TABLE class_groups ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0")
+    # courses are now just groups: drop the old free-text column
+    if "course" in [r[1] for r in conn.execute("PRAGMA table_info(assignments)")]:
+        conn.execute("ALTER TABLE assignments DROP COLUMN course")
+    # group admins: creators are admins by default; web ADMINS run RKA
+    if "is_admin" not in [r[1] for r in conn.execute("PRAGMA table_info(group_members)")]:
+        conn.execute("ALTER TABLE group_members ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+        conn.execute("""UPDATE group_members SET is_admin = 1 WHERE nrp =
+                        (SELECT created_by FROM class_groups WHERE id = group_members.group_id)""")
+    conn.executemany("UPDATE group_members SET is_admin = 1 WHERE group_id = ? AND nrp = ?",
+                     [(rka[0], n) for n in ADMINS])
     conn.commit()
     conn.close()
 
@@ -137,11 +217,33 @@ def guards():
             return redirect(url_for("change_password"))
 
 
+def names():
+    if "names" not in g:
+        g.names = {r["nrp"]: r["name"] for r in db().execute("SELECT nrp, name FROM users")}
+    return g.names
+
+
+@app.template_filter("who")
+def who(nrp):
+    """Display name for an NRP, falling back to the NRP itself."""
+    return names().get(nrp) or nrp
+
+
 @app.context_processor
 def inject():
     if "csrf" not in session:
         session["csrf"] = secrets.token_hex(16)
-    return {"csrf": session["csrf"], "me": current_user(), "is_admin": current_user() in ADMINS}
+    return {"csrf": session["csrf"], "me": current_user()}
+
+
+@app.url_defaults
+def bust_static_cache(endpoint, values):
+    """/static/x.css?v=<mtime>: a changed file gets a new URL, so Cloudflare/browser caches can't serve stale CSS/JS."""
+    if endpoint == "static" and "filename" in values:
+        try:
+            values["v"] = int(os.stat(os.path.join(app.static_folder, values["filename"])).st_mtime)
+        except OSError:
+            pass
 
 
 @app.after_request
@@ -189,16 +291,75 @@ def parse_time(value):
     return (h, mi) if h < 24 and mi < 60 else None
 
 
-def form_fields():
-    course = request.form.get("course", "").strip()[:80]
+VISIBLE_SQL = """(a.created_by = :me
+    OR a.group_id IN (SELECT group_id FROM group_members WHERE nrp = :me)
+    OR a.id IN (SELECT assignment_id FROM assignment_recipients WHERE nrp = :me))"""
+
+
+def my_groups():
+    return db().execute(
+        """SELECT g.* FROM class_groups g
+           JOIN group_members m ON m.group_id = g.id AND m.nrp = ?
+           ORDER BY g.is_default DESC, g.name COLLATE NOCASE""",
+        (current_user(),),
+    ).fetchall()
+
+
+def default_group_id():
+    return db().execute("SELECT id FROM class_groups WHERE is_default = 1").fetchone()["id"]
+
+
+def can_view(aid):
+    return db().execute(
+        f"SELECT 1 FROM assignments a WHERE a.id = :id AND {VISIBLE_SQL}",
+        {"id": aid, "me": current_user()},
+    ).fetchone() is not None
+
+
+def multi(name):
+    """All values of a repeated form field (picker checkboxes), plus any typed text."""
+    return ",".join(request.form.getlist(name))
+
+
+def people(exclude=()):
+    """Everyone who can be picked, sorted by name."""
+    rows = db().execute(
+        "SELECT nrp, name FROM users ORDER BY COALESCE(name, nrp) COLLATE NOCASE").fetchall()
+    return [r for r in rows if r["nrp"] not in set(exclude)]
+
+
+def parse_nrps(text):
+    """Split on commas/spaces/newlines. '28' or '028' expands to the class prefix.
+    Returns (valid nrps, unknown tokens)."""
+    tokens = []
+    for t in re.split(r"[\s,;]+", (text or "").strip()):
+        if re.fullmatch(r"\d{1,3}", t):
+            t = f"{NRP_PREFIX}{int(t):03d}"
+        if t and t not in tokens:
+            tokens.append(t)
+    known = {r["nrp"] for r in db().execute(
+        f"SELECT nrp FROM users WHERE nrp IN ({','.join('?' * len(tokens))})", tokens)} if tokens else set()
+    return [t for t in tokens if t in known], [t for t in tokens if t not in known]
+
+
+def form_fields(allowed_groups):
     title = request.form.get("title", "").strip()[:150]
     description = request.form.get("description", "").strip()[:2000]
     link = clean_link(request.form.get("link"))
     date = request.form.get("date", "").strip()
     time = request.form.get("time", "").strip()
     errors = []
-    if not course:
-        errors.append("Course is required.")
+    raw_group = request.form.get("group", "")
+    group_id = int(raw_group) if raw_group.isdigit() else None
+    if group_id is not None and group_id not in allowed_groups:
+        errors.append("Pick one of your groups.")
+        group_id = None
+    nrps_text = multi("nrps")
+    recipients, unknown = parse_nrps(nrps_text)
+    if unknown:
+        errors.append("Unknown NRP: " + ", ".join(unknown))
+    if group_id is None and not recipients and not errors:
+        errors.append("Pick a group or add at least one NRP.")
     if not title:
         errors.append("Title is required.")
     deadline = ""
@@ -211,8 +372,9 @@ def form_fields():
             deadline = d.replace(hour=hm[0], minute=hm[1]).strftime("%Y-%m-%dT%H:%M")
     except ValueError:
         errors.append("Pick a deadline date.")
-    return dict(course=course, title=title, description=description,
-                link=link, deadline=deadline, date=date, time=time), errors
+    return dict(title=title, description=description,
+                link=link, deadline=deadline, date=date, time=time,
+                group_id=group_id, nrps=nrps_text, recipients=recipients), errors
 
 
 # ---------- routes ----------
@@ -270,6 +432,7 @@ def change_password():
     return render_template("change_password.html", forced=forced)
 
 
+MEMBERS_PER_PAGE = 10
 OVERDUE_GRACE_DAYS = 14  # undone items older than this only show under "All"
 BUCKETS = [("past", "Overdue"), ("today", "Today"), ("tomorrow", "Tomorrow"),
            ("week", "This week"), ("later", "Later")]
@@ -292,16 +455,25 @@ def index():
     view = request.args.get("view", "todo")
     if view not in ("todo", "done", "all"):
         view = "todo"
-    course = request.args.get("course", "")
+    mygroups = my_groups()
+    gid = request.args.get("group", type=int)
+    if gid not in {g["id"] for g in mygroups}:
+        gid = None
+    admin_gids = {r["group_id"] for r in db().execute(
+        "SELECT group_id FROM group_members WHERE nrp = ? AND is_admin = 1", (current_user(),))}
     rows = db().execute(
-        """
-        SELECT a.*, (c.nrp IS NOT NULL) AS done
+        f"""
+        SELECT a.*, gr.name AS group_name, (c.nrp IS NOT NULL) AS done
         FROM assignments a
-        LEFT JOIN completions c ON c.assignment_id = a.id AND c.nrp = ?
+        LEFT JOIN class_groups gr ON gr.id = a.group_id
+        LEFT JOIN completions c ON c.assignment_id = a.id AND c.nrp = :me
+        WHERE {VISIBLE_SQL}
         ORDER BY a.deadline ASC
         """,
-        (current_user(),),
+        {"me": current_user()},
     ).fetchall()
+    if gid:
+        rows = [r for r in rows if r["group_id"] == gid]
     now = datetime.now()
     items = []
     for r in rows:
@@ -309,6 +481,7 @@ def index():
         delta = (dl - now).total_seconds()
         item = dict(r)
         item["dl"] = dl
+        item["can_delete"] = item["created_by"] == current_user() or item["group_id"] in admin_gids
         item["done"] = bool(item["done"])
         item["overdue"] = delta < 0
         item["rel"] = humanize(delta) + " overdue" if delta < 0 else "in " + humanize(delta)
@@ -334,14 +507,11 @@ def index():
         "done": stats["done"],
         "all": len(items),
     }
-    courses = sorted({i["course"] for i in items}, key=str.lower)
 
     if view == "done":
         items = [i for i in items if i["done"]]
     elif view == "todo":
         items = [i for i in items if i["todo"]]
-    if course:
-        items = [i for i in items if i["course"] == course]
 
     groups = []
     for key, label in BUCKETS:
@@ -352,27 +522,42 @@ def index():
                 label = "Past"
         if rows_:
             groups.append({"label": label, "rows": rows_})
-    return render_template("index.html", groups=groups, view=view, course=course,
-                           courses=courses, stats=stats, counts=counts, total=len(items))
+    return render_template("index.html", groups=groups, view=view,
+                           stats=stats, counts=counts, total=len(items),
+                           mygroups=mygroups, group=gid or 0)
+
+
+def save_recipients(aid, recipients):
+    db().execute("DELETE FROM assignment_recipients WHERE assignment_id = ?", (aid,))
+    db().executemany(
+        "INSERT OR IGNORE INTO assignment_recipients (assignment_id, nrp) VALUES (?, ?)",
+        [(aid, n) for n in recipients if n != current_user()],
+    )
 
 
 @app.route("/add", methods=["GET", "POST"])
 @login_required
 def add():
+    groups = my_groups()
     if request.method == "POST":
-        data, errors = form_fields()
+        data, errors = form_fields({g["id"] for g in groups})
         if errors:
             for e in errors:
                 flash(e)
-            return render_template("form.html", a=data, editing=False)
-        db().execute(
-            """INSERT INTO assignments (course, title, description, link, deadline, created_by, created_at)
-               VALUES (:course, :title, :description, :link, :deadline, :by, :at)""",
+            return render_template("form.html", a=data, editing=False, groups=groups,
+                                   people=people({current_user()}))
+        cur = db().execute(
+            """INSERT INTO assignments (title, description, link, deadline, created_by, created_at, group_id)
+               VALUES (:title, :description, :link, :deadline, :by, :at, :group_id)""",
             {**data, "by": current_user(), "at": datetime.now().isoformat(timespec="seconds")},
         )
+        save_recipients(cur.lastrowid, data["recipients"])
         db().commit()
-        return redirect(url_for("index"))
-    return render_template("form.html", a={}, editing=False)
+        return redirect(url_for("index", group=data["group_id"] or None))
+    wanted = request.args.get("group", type=int)
+    gid = wanted if wanted in {g["id"] for g in groups} else default_group_id()
+    return render_template("form.html", a={"group_id": gid}, editing=False, groups=groups,
+                           people=people({current_user()}))
 
 
 def get_owned(aid):
@@ -388,30 +573,38 @@ def get_owned(aid):
 @login_required
 def edit(aid):
     row = get_owned(aid)
+    groups = my_groups()
+    allowed = {g["id"] for g in groups} | {row["group_id"]}
     if request.method == "POST":
-        data, errors = form_fields()
+        data, errors = form_fields(allowed)
         if errors:
             for e in errors:
                 flash(e)
-            return render_template("form.html", a={**data, "id": aid}, editing=True)
+            return render_template("form.html", a={**data, "id": aid}, editing=True, groups=groups,
+                                   people=people({current_user()}))
         db().execute(
-            """UPDATE assignments SET course=:course, title=:title, description=:description,
-               link=:link, deadline=:deadline WHERE id=:id""",
+            """UPDATE assignments SET title=:title, description=:description,
+               link=:link, deadline=:deadline, group_id=:group_id WHERE id=:id""",
             {**data, "id": aid},
         )
+        save_recipients(aid, data["recipients"])
         db().commit()
         return redirect(url_for("index"))
-    return render_template("form.html", a=dict(row), editing=True)
+    recipients = [r["nrp"] for r in db().execute(
+        "SELECT nrp FROM assignment_recipients WHERE assignment_id = ?", (aid,))]
+    return render_template("form.html", a={**dict(row), "recipients": recipients}, editing=True,
+                           groups=groups, people=people({current_user()}))
 
 
 @app.route("/delete/<int:aid>", methods=["POST"])
 @login_required
 def delete(aid):
-    if current_user() in ADMINS:
-        if db().execute("SELECT 1 FROM assignments WHERE id = ?", (aid,)).fetchone() is None:
-            abort(404)
-    else:
-        get_owned(aid)
+    row = db().execute("SELECT * FROM assignments WHERE id = ?", (aid,)).fetchone()
+    if row is None:
+        abort(404)
+    # the creator, or an admin of the assignment's group
+    if row["created_by"] != current_user() and not is_group_admin(row["group_id"]):
+        abort(403)
     db().execute("DELETE FROM assignments WHERE id = ?", (aid,))
     db().commit()
     return redirect(request.referrer or url_for("index"))
@@ -420,7 +613,7 @@ def delete(aid):
 @app.route("/toggle/<int:aid>", methods=["POST"])
 @login_required
 def toggle(aid):
-    if db().execute("SELECT 1 FROM assignments WHERE id = ?", (aid,)).fetchone() is None:
+    if not can_view(aid):
         abort(404)
     cur = db().execute(
         "DELETE FROM completions WHERE nrp = ? AND assignment_id = ?", (current_user(), aid)
@@ -431,6 +624,218 @@ def toggle(aid):
         )
     db().commit()
     return redirect(request.referrer or url_for("index"))
+
+
+# ---------- groups ----------
+
+def is_group_admin(gid, nrp=None):
+    if gid is None:
+        return False
+    return db().execute(
+        "SELECT 1 FROM group_members WHERE group_id = ? AND nrp = ? AND is_admin = 1",
+        (gid, nrp or current_user()),
+    ).fetchone() is not None
+
+
+def admin_count(gid):
+    return db().execute(
+        "SELECT COUNT(*) FROM group_members WHERE group_id = ? AND is_admin = 1", (gid,)
+    ).fetchone()[0]
+
+
+def get_group(gid):
+    """Group row if the user is a member."""
+    row = db().execute("SELECT * FROM class_groups WHERE id = ?", (gid,)).fetchone()
+    if row is None:
+        abort(404)
+    member = db().execute(
+        "SELECT 1 FROM group_members WHERE group_id = ? AND nrp = ?", (gid, current_user())
+    ).fetchone()
+    if not member:
+        abort(404)
+    return row
+
+
+def can_manage(group):
+    """Group admins only."""
+    return is_group_admin(group["id"])
+
+
+def add_members(gid, text):
+    valid, unknown = parse_nrps(text)
+    db().executemany(
+        "INSERT OR IGNORE INTO group_members (group_id, nrp) VALUES (?, ?)",
+        [(gid, n) for n in valid],
+    )
+    if unknown:
+        flash("Skipped unknown NRP: " + ", ".join(unknown))
+    return valid
+
+
+@app.route("/groups")
+@login_required
+def groups():
+    cut = (datetime.now() - timedelta(days=OVERDUE_GRACE_DAYS)).strftime("%Y-%m-%dT%H:%M")
+    rows = db().execute(
+        """
+        SELECT g.*, m.is_admin AS mine_admin,
+          (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) AS members,
+          (SELECT COUNT(*) FROM assignments WHERE group_id = g.id) AS total,
+          (SELECT COUNT(*) FROM assignments a WHERE a.group_id = g.id AND a.deadline >= :cut
+             AND a.id NOT IN (SELECT assignment_id FROM completions WHERE nrp = :me)) AS todo
+        FROM class_groups g
+        JOIN group_members m ON m.group_id = g.id AND m.nrp = :me
+        ORDER BY g.is_default DESC, g.name COLLATE NOCASE
+        """,
+        {"me": current_user(), "cut": cut},
+    ).fetchall()
+    public = db().execute(
+        """
+        SELECT g.*,
+          (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) AS members,
+          (SELECT COUNT(*) FROM assignments WHERE group_id = g.id) AS total
+        FROM class_groups g
+        WHERE g.is_public = 1
+          AND g.id NOT IN (SELECT group_id FROM group_members WHERE nrp = ?)
+        ORDER BY g.name COLLATE NOCASE
+        """,
+        (current_user(),),
+    ).fetchall()
+    return render_template("groups.html", rows=rows, public=public)
+
+
+@app.route("/groups/new")
+@login_required
+def group_new():
+    return render_template("group_new.html", people=people({current_user()}))
+
+
+@app.route("/groups/create", methods=["POST"])
+@login_required
+def group_create():
+    name = request.form.get("name", "").strip()[:40]
+    if not name:
+        flash("Give the group a name.")
+        return redirect(url_for("group_new"))
+    cur = db().execute(
+        "INSERT INTO class_groups (name, created_by, is_default, is_public, created_at) VALUES (?, ?, 0, ?, ?)",
+        (name, current_user(), int(request.form.get("visibility") == "public"),
+         datetime.now().isoformat(timespec="seconds")),
+    )
+    gid = cur.lastrowid
+    db().execute("INSERT INTO group_members (group_id, nrp, is_admin) VALUES (?, ?, 1)",
+                 (gid, current_user()))
+    add_members(gid, multi("members"))
+    db().commit()
+    return redirect(url_for("group_view", gid=gid))
+
+
+@app.route("/groups/<int:gid>")
+@login_required
+def group_view(gid):
+    group = get_group(gid)
+    all_nrps = {r["nrp"] for r in db().execute("SELECT nrp FROM group_members WHERE group_id = ?", (gid,))}
+    member_count = len(all_nrps)
+    pages = max(1, -(-member_count // MEMBERS_PER_PAGE))
+    page = min(max(request.args.get("page", 1, type=int), 1), pages)
+    members = db().execute(
+        """SELECT m.nrp, m.is_admin FROM group_members m JOIN users u ON u.nrp = m.nrp
+           WHERE m.group_id = ? ORDER BY m.is_admin DESC, COALESCE(u.name, u.nrp) COLLATE NOCASE
+           LIMIT ? OFFSET ?""",
+        (gid, MEMBERS_PER_PAGE, (page - 1) * MEMBERS_PER_PAGE)).fetchall()
+    total = db().execute(
+        "SELECT COUNT(*) FROM assignments WHERE group_id = ?", (gid,)).fetchone()[0]
+    return render_template("group.html", group=group, members=members, total=total,
+                           manage=can_manage(group), is_member=current_user() in all_nrps,
+                           people=people(all_nrps), member_count=member_count,
+                           page=page, pages=pages, first=(page - 1) * MEMBERS_PER_PAGE + 1)
+
+
+@app.route("/groups/<int:gid>/join", methods=["POST"])
+@login_required
+def group_join(gid):
+    group = db().execute("SELECT * FROM class_groups WHERE id = ?", (gid,)).fetchone()
+    if group is None or not group["is_public"]:
+        abort(404)  # private groups look like they don't exist
+    db().execute("INSERT OR IGNORE INTO group_members (group_id, nrp, is_admin) VALUES (?, ?, 0)",
+                 (gid, current_user()))
+    db().commit()
+    return redirect(url_for("group_view", gid=gid))
+
+
+@app.route("/groups/<int:gid>/visibility", methods=["POST"])
+@login_required
+def group_visibility(gid):
+    group = get_group(gid)
+    if group["is_default"] or not can_manage(group):
+        abort(403)
+    db().execute("UPDATE class_groups SET is_public = ? WHERE id = ?",
+                 (int(request.form.get("visibility") == "public"), gid))
+    db().commit()
+    return redirect(url_for("group_view", gid=gid))
+
+
+@app.route("/groups/<int:gid>/members", methods=["POST"])
+@login_required
+def group_add_members(gid):
+    group = get_group(gid)
+    if group["is_default"] and not can_manage(group):  # RKA: admins only
+        abort(403)
+    add_members(gid, multi("members"))
+    db().commit()
+    return redirect(url_for("group_view", gid=gid))
+
+
+@app.route("/groups/<int:gid>/remove", methods=["POST"])
+@login_required
+def group_remove(gid):
+    group = get_group(gid)
+    nrp = request.form.get("nrp", "")
+    leaving = nrp == current_user()
+    if leaving:
+        if group["is_default"]:
+            abort(403)
+    elif not can_manage(group):
+        abort(403)
+    if is_group_admin(gid, nrp) and admin_count(gid) <= 1:
+        flash("This is the only admin. Make someone else admin first.")
+        return redirect(url_for("group_view", gid=gid, page=request.form.get("page", type=int)))
+    db().execute("DELETE FROM group_members WHERE group_id = ? AND nrp = ?", (gid, nrp))
+    db().commit()
+    if leaving:
+        return redirect(url_for("groups"))
+    return redirect(url_for("group_view", gid=gid, page=request.form.get("page", type=int), _anchor="members"))
+
+
+@app.route("/groups/<int:gid>/role", methods=["POST"])
+@login_required
+def group_role(gid):
+    group = get_group(gid)
+    if not can_manage(group):
+        abort(403)
+    nrp = request.form.get("nrp", "")
+    make_admin = request.form.get("admin") == "1"
+    if not db().execute("SELECT 1 FROM group_members WHERE group_id = ? AND nrp = ?", (gid, nrp)).fetchone():
+        abort(404)
+    if not make_admin and is_group_admin(gid, nrp) and admin_count(gid) <= 1:
+        flash("A group needs at least one admin.")
+        return redirect(url_for("group_view", gid=gid, page=request.form.get("page", type=int)))
+    db().execute("UPDATE group_members SET is_admin = ? WHERE group_id = ? AND nrp = ?",
+                 (int(make_admin), gid, nrp))
+    db().commit()
+    return redirect(url_for("group_view", gid=gid, page=request.form.get("page", type=int), _anchor="members"))
+
+
+@app.route("/groups/<int:gid>/delete", methods=["POST"])
+@login_required
+def group_delete(gid):
+    group = get_group(gid)
+    if group["is_default"] or not can_manage(group):
+        abort(403)
+    db().execute("DELETE FROM assignments WHERE group_id = ?", (gid,))
+    db().execute("DELETE FROM class_groups WHERE id = ?", (gid,))
+    db().commit()
+    return redirect(url_for("groups"))
 
 
 if __name__ == "__main__":

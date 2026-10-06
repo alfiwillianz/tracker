@@ -5,9 +5,9 @@
 <div class="page-head">
     <div>
         <h1>Assignments</h1>
-        <p class="muted">Shared by the whole class. Ticking a circle is just for you.</p>
+        <p class="muted">Shared with your groups. Ticking a circle is just for you.</p>
     </div>
-    <a href="{{ url_for('add') }}" class="button primary">+ Add</a>
+    <a href="{{ url_for('add', group=group or None) }}" class="button primary">+ Add</a>
 </div>
 
 <div class="stats">
@@ -18,15 +18,15 @@
 
 <div class="seg">
     {% for key, label in [('todo', 'To do'), ('done', 'Done'), ('all', 'All')] %}
-    <a href="{{ url_for('index', view=key, course=course or None) }}" class="{{ 'active' if view == key }}">{{ label }} <span>{{ counts[key] }}</span></a>
+    <a href="{{ url_for('index', view=key, group=group or None) }}" class="{{ 'active' if view == key }}">{{ label }} <span>{{ counts[key] }}</span></a>
     {% endfor %}
 </div>
 
-{% if courses|length > 1 %}
+{% if mygroups|length > 1 %}
 <div class="chips">
-    <a href="{{ url_for('index', view=view) }}" class="chip {{ 'active' if not course }}">All courses</a>
-    {% for c in courses %}
-    <a href="{{ url_for('index', view=view, course=c) }}" class="chip {{ 'active' if c == course }}">{{ c }}</a>
+    <a href="{{ url_for('index', view=view) }}" class="chip {{ 'active' if not group }}">All groups</a>
+    {% for g in mygroups %}
+    <a href="{{ url_for('index', view=view, group=g.id) }}" class="chip {{ 'active' if g.id == group }}">{{ g.name }}</a>
     {% endfor %}
 </div>
 {% endif %}
@@ -48,8 +48,9 @@
             </div>
         </div>
         <div class="meta">
-            <a href="{{ url_for('index', view=view, course=a.course) }}" class="chip small">{{ a.course }}</a>
-            <span>added by {{ a.created_by }}</span>
+            {% if a.group_name %}<a href="{{ url_for('index', view=view, group=a.group_id) }}" class="chip small">{{ a.group_name }}</a>
+            {% else %}<span class="chip small grp">direct</span>{% endif %}
+            <span>added by {{ a.created_by|who }}</span>
         </div>
         {% if a.description %}
             {% if a.description|length > 160 %}
@@ -62,10 +63,10 @@
             {% endif %}
         {% endif %}
         {% if a.link %}<p class="link"><a href="{{ a.link }}" target="_blank" rel="noopener noreferrer">{{ a.link|replace('https://', '')|replace('http://', '')|truncate(60, True) }} ↗</a></p>{% endif %}
-        {% if a.created_by == me or is_admin %}
+        {% if a.created_by == me or a.can_delete %}
         <div class="actions">
             {% if a.created_by == me %}<a href="{{ url_for('edit', aid=a.id) }}">Edit</a>{% endif %}
-            <form method="post" action="{{ url_for('delete', aid=a.id) }}" class="inline" onsubmit="return confirm('Delete this assignment for everyone?')">
+            <form method="post" action="{{ url_for('delete', aid=a.id) }}" class="inline" data-confirm="“{{ a.title }}” will be deleted for everyone it was shared with. This can't be undone." data-confirm-title="Delete assignment?" data-confirm-ok="Delete">
                 <input type="hidden" name="csrf" value="{{ csrf }}">
                 <button type="submit" class="linkbtn del">Delete{% if a.created_by != me %} (admin){% endif %}</button>
             </form>
@@ -76,13 +77,13 @@
 {% endfor %}
 {% else %}
 <div class="empty">
-    <p>{{ "You're all caught up 🎉" if view == 'todo' and not course else "Nothing here." }}</p>
+    <p>{{ "You're all caught up 🎉" if view == 'todo' and not group else "Nothing here." }}</p>
     <a href="{{ url_for('add') }}">Add an assignment</a>
 </div>
 {% endfor %}
 
 <div class="account">
-    <span>{{ me }}</span>
+    <span>{{ me|who }}</span>
     <span>•</span>
     <a href="{{ url_for('change_password') }}">Change password</a>
     <span>•</span>

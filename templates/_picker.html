@@ -1,0 +1,27 @@
+{# Searchable multi-select. Works without JS as a plain checkbox list; static/picker.js adds filtering + chips. #}
+{% macro picker(name, people, selected=[], placeholder="Search name or NRP…") %}
+<div class="picker" data-picker>
+    <div class="picker-chips" data-chips></div>
+    <input type="search" class="picker-search" placeholder="{{ placeholder }}" autocomplete="off" data-search>
+    <div class="picker-list" data-list>
+        {% for p in people %}
+        {% set parts = (p.name or p.nrp).split() %}
+        <label class="picker-item" data-text="{{ ((p.name or '') ~ ' ' ~ p.nrp)|lower }}">
+            <input type="checkbox" name="{{ name }}" value="{{ p.nrp }}" data-label="{{ p.name or p.nrp }}" {{ 'checked' if p.nrp in selected }}>
+            <span class="tick" aria-hidden="true">✓</span>
+            <span class="avatar" aria-hidden="true">{{ (parts[0][:1] ~ (parts[-1][:1] if parts|length > 1 else ''))|upper }}</span>
+            <span class="n">{{ p.name or p.nrp }}</span><span class="id">{{ p.nrp }}</span>
+        </label>
+        {% else %}
+        <p class="muted picker-empty">Nobody left to add.</p>
+        {% endfor %}
+    </div>
+    <div class="picker-foot">
+        <span class="muted" data-count></span>
+        <span>
+            <button type="button" class="linkbtn" data-all>Select shown</button>
+            <button type="button" class="linkbtn" data-none>Clear</button>
+        </span>
+    </div>
+</div>
+{% endmacro %}

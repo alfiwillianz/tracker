@@ -12,6 +12,12 @@
     <header>
         <div class="header-content">
             <a href="{{ url_for('index') }}" class="name">tracker;</a>
+            {% if me and not forced %}
+            <nav>
+                <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint in ('index', 'add', 'edit') }}">Assignments</a>
+                <a href="{{ url_for('groups') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('group') }}">Groups</a>
+            </nav>
+            {% endif %}
         </div>
     </header>
     <main>
@@ -27,5 +33,9 @@
             <p>&copy; 2026 alfi; made with 💛</p>
         </div>
     </footer>
+    <script src="{{ url_for('static', filename='picker.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='menu.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='select.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='confirm.js') }}" defer></script>
 </body>
 </html>

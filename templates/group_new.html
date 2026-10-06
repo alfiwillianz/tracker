@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_picker.html" import picker %}
+{% block title %}New group - tracker{% endblock %}
+{% block boxclass %}welcome-box wide{% endblock %}
+{% block content %}
+<h1>New group</h1>
+<form method="post" action="{{ url_for('group_create') }}" class="form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="text" name="name" placeholder="Group name (e.g. Signal Processing)" maxlength="40" required autofocus>
+
+    <div>
+        <label class="muted">Who can find it?</label>
+        <div class="radio-cards">
+            <label class="radio-card">
+                <input type="radio" name="visibility" value="private" checked>
+                <span class="dot"></span>
+                <span class="text"><b>Private</b><small>Only people you add can see it.</small></span>
+            </label>
+            <label class="radio-card">
+                <input type="radio" name="visibility" value="public">
+                <span class="dot"></span>
+                <span class="text"><b>Public</b><small>Listed on the Groups page. Anyone can join.</small></span>
+            </label>
+        </div>
+    </div>
+
+    <div>
+        <label class="muted">Members (optional, you're added as admin)</label>
+        {{ picker('members', people) }}
+    </div>
+    <div class="button-container">
+        <button type="submit">Create group</button>
+        <a href="{{ url_for('groups') }}" class="button">Cancel</a>
+    </div>
+</form>
+{% endblock %}

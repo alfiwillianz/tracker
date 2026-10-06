@@ -15,3 +15,6 @@ venv/
 .idea/
 *.swp
 .DS_Store
+
+# class list with real names
+students.tsv

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% from "_picker.html" import picker %}
+{% block title %}{{ group.name }} - tracker{% endblock %}
+{% block boxclass %}page{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>{{ group.name }}</h1>
+        <p class="muted">{{ 'Public' if group.is_public else 'Private' }} • {{ member_count }} member{{ '' if member_count == 1 else 's' }} • {{ total }} assignment{{ '' if total == 1 else 's' }}{% if group.created_by %} • created by {{ group.created_by|who }}{% endif %}</p>
+    </div>
+    <a href="{{ url_for('index', group=group.id) }}" class="button primary">View assignments</a>
+</div>
+
+<h2 class="group" id="members">Members <span>{{ member_count }}</span></h2>
+<div class="project-tile card plain">
+    <div class="card-body">
+        <ul class="members">
+            {% for m in members %}
+            <li>
+                <span class="who">
+                    {{ m.nrp|who }}{% if m.nrp|who != m.nrp %} <small class="muted">{{ m.nrp }}</small>{% endif %}
+                    {% if m.nrp == me %}<em>(you)</em>{% endif %}
+                    {% if m.is_admin %}<span class="chip small">admin</span>{% endif %}
+                    {% if m.nrp == group.created_by %}<span class="chip small grp">creator</span>{% endif %}
+                </span>
+                {% if m.nrp != me and manage %}
+                <details class="kebab">
+                    <summary aria-label="Actions for {{ m.nrp|who }}" title="Actions">⋯</summary>
+                    <div class="menu">
+                        <form method="post" action="{{ url_for('group_role', gid=group.id) }}">
+                            <input type="hidden" name="csrf" value="{{ csrf }}">
+                            <input type="hidden" name="nrp" value="{{ m.nrp }}">
+                            <input type="hidden" name="admin" value="{{ 0 if m.is_admin else 1 }}">
+                            <input type="hidden" name="page" value="{{ page }}">
+                            <button type="submit">{{ 'Remove as admin' if m.is_admin else 'Make admin' }}</button>
+                        </form>
+                        <form method="post" action="{{ url_for('group_remove', gid=group.id) }}" data-confirm="Remove {{ m.nrp|who }} from {{ group.name }}? They'll stop seeing this group's assignments." data-confirm-title="Remove member?" data-confirm-ok="Remove">
+                            <input type="hidden" name="csrf" value="{{ csrf }}">
+                            <input type="hidden" name="nrp" value="{{ m.nrp }}">
+                            <input type="hidden" name="page" value="{{ page }}">
+                            <button type="submit" class="danger">Remove from group</button>
+                        </form>
+                    </div>
+                </details>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% if pages > 1 %}
+        <nav class="pager" aria-label="Members pages">
+            <span class="muted">{{ first }}–{{ first + members|length - 1 }} of {{ member_count }}</span>
+            <span class="pages">
+                {% if page > 1 %}<a href="{{ url_for('group_view', gid=group.id, page=page - 1, _anchor='members') }}" rel="prev">‹ Prev</a>{% else %}<span class="off">‹ Prev</span>{% endif %}
+                {% for n in range(1, pages + 1) %}
+                <a href="{{ url_for('group_view', gid=group.id, page=n, _anchor='members') }}" class="{{ 'active' if n == page }}" {{ 'aria-current=page' if n == page }}>{{ n }}</a>
+                {% endfor %}
+                {% if page < pages %}<a href="{{ url_for('group_view', gid=group.id, page=page + 1, _anchor='members') }}" rel="next">Next ›</a>{% else %}<span class="off">Next ›</span>{% endif %}
+            </span>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+
+{% if not group.is_default or manage %}
+<h2 class="group">Add members</h2>
+<div class="project-tile card plain">
+    <form method="post" action="{{ url_for('group_add_members', gid=group.id) }}" class="form grow">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        {{ picker('members', people) }}
+        <div class="button-container"><button type="submit">Add</button></div>
+    </form>
+</div>
+
+<div class="account">
+    {% if is_member and not group.is_default %}
+    <form method="post" action="{{ url_for('group_remove', gid=group.id) }}" class="inline" data-confirm="You'll stop seeing {{ group.name }} and its assignments. An admin can add you back." data-confirm-title="Leave group?" data-confirm-ok="Leave">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="nrp" value="{{ me }}">
+        <button type="submit" class="linkbtn">Leave group</button>
+    </form>
+    {% endif %}
+    {% if manage and not group.is_default %}
+    {% if is_member %}<span>•</span>{% endif %}
+    <form method="post" action="{{ url_for('group_visibility', gid=group.id) }}" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="visibility" value="{{ 'private' if group.is_public else 'public' }}">
+        <button type="submit" class="linkbtn">Make {{ 'private' if group.is_public else 'public' }}</button>
+    </form>
+    <span>•</span>
+    <form method="post" action="{{ url_for('group_delete', gid=group.id) }}" class="inline" data-confirm="Delete {{ group.name }} and its {{ total }} assignment{{ '' if total == 1 else 's' }} for everyone? This can't be undone." data-confirm-title="Delete group?" data-confirm-ok="Delete">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit" class="linkbtn del">Delete group</button>
+    </form>
+    {% endif %}
+</div>
+{% else %}
+<p class="muted">Only group admins can change who is in this group.</p>
+{% endif %}
+{% endblock %}
