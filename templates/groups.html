@@ -13,7 +13,7 @@
 {% for g in rows %}
 <a href="{{ url_for('group_view', gid=g.id) }}" class="project-tile card group-card">
     <div class="card-body">
-        <div class="card-top">
+        <div class="card-top keep-row">
             <h3>{{ g.name }}{% if g.is_default %} <span class="chip small grp">default</span>{% endif %}{% if g.mine_admin %} <span class="chip small grp">admin</span>{% endif %}{% if g.is_public %} <span class="chip small grp">public</span>{% endif %}</h3>
             <div class="due"><span class="pill {{ 'warn' if g.todo }}">{{ g.todo }} to do</span></div>
         </div>
@@ -31,7 +31,7 @@
 {% for g in public %}
 <div class="project-tile card plain">
     <div class="card-body">
-        <div class="card-top">
+        <div class="card-top keep-row">
             <h3>{{ g.name }}</h3>
             <form method="post" action="{{ url_for('group_join', gid=g.id) }}">
                 <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -42,7 +42,7 @@
             <span>{{ g.members }} member{{ '' if g.members == 1 else 's' }}</span>
             <span>•</span>
             <span>{{ g.total }} assignment{{ '' if g.total == 1 else 's' }}</span>
-            {% if g.created_by %}<span>•</span><span>by {{ g.created_by|who }}</span>{% endif %}
+            {% if g.created_by %}<span class="by"><i class="dot">•</i>by {{ g.created_by|who }}</span>{% endif %}
         </div>
     </div>
 </div>
