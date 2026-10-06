@@ -2,11 +2,12 @@ import os
 import re
 import secrets
 import sqlite3
+import time
 from datetime import datetime, timedelta
 from functools import wraps
 
 from werkzeug.middleware.proxy_fix import ProxyFix
-from flask import (Flask, abort, flash, g, make_response, redirect, render_template,
+from flask import (Flask, abort, flash, g, jsonify, make_response, redirect, render_template,
                    request, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -37,6 +38,7 @@ def load_students():
 ADMINS = set(os.environ.get("ADMINS", f"{NRP_PREFIX}028").split(","))
 
 app = Flask(__name__)
+app.json.sort_keys = False  # keep API fields in the order we write them
 if os.environ.get("TRUST_PROXY") == "1":  # behind cloudflared / a reverse proxy
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
@@ -199,8 +201,8 @@ def login_required(view):
 
 @app.before_request
 def guards():
-    if request.endpoint == "static":
-        return
+    if request.endpoint == "static" or request.path.startswith("/v1"):
+        return  # static files, and the cookie-less JSON API (it has its own Basic auth)
     # CSRF
     if request.method == "POST":
         token = session.get("csrf")
@@ -449,18 +451,11 @@ def bucket_of(dl, now):
     return "week" if days <= 7 else "later"
 
 
-@app.route("/")
-@login_required
-def index():
-    view = request.args.get("view", "todo")
-    if view not in ("todo", "done", "all"):
-        view = "todo"
-    mygroups = my_groups()
-    gid = request.args.get("group", type=int)
-    if gid not in {g["id"] for g in mygroups}:
-        gid = None
+def visible_assignments(nrp, gid=None):
+    """Every assignment `nrp` can see, as dicts with deadline/done/overdue/bucket/tone filled in.
+    Shared by the web UI and the JSON API."""
     admin_gids = {r["group_id"] for r in db().execute(
-        "SELECT group_id FROM group_members WHERE nrp = ? AND is_admin = 1", (current_user(),))}
+        "SELECT group_id FROM group_members WHERE nrp = ? AND is_admin = 1", (nrp,))}
     rows = db().execute(
         f"""
         SELECT a.*, gr.name AS group_name, (c.nrp IS NOT NULL) AS done
@@ -470,7 +465,7 @@ def index():
         WHERE {VISIBLE_SQL}
         ORDER BY a.deadline ASC
         """,
-        {"me": current_user()},
+        {"me": nrp},
     ).fetchall()
     if gid:
         rows = [r for r in rows if r["group_id"] == gid]
@@ -481,7 +476,8 @@ def index():
         delta = (dl - now).total_seconds()
         item = dict(r)
         item["dl"] = dl
-        item["can_delete"] = item["created_by"] == current_user() or item["group_id"] in admin_gids
+        item["delta"] = delta
+        item["can_delete"] = item["created_by"] == nrp or item["group_id"] in admin_gids
         item["done"] = bool(item["done"])
         item["overdue"] = delta < 0
         item["rel"] = humanize(delta) + " overdue" if delta < 0 else "in " + humanize(delta)
@@ -496,6 +492,20 @@ def index():
             item["tone"] = ""
         item["todo"] = not item["done"] and (delta > -86400 * OVERDUE_GRACE_DAYS)
         items.append(item)
+    return items
+
+
+@app.route("/")
+@login_required
+def index():
+    view = request.args.get("view", "todo")
+    if view not in ("todo", "done", "all"):
+        view = "todo"
+    mygroups = my_groups()
+    gid = request.args.get("group", type=int)
+    if gid not in {g["id"] for g in mygroups}:
+        gid = None
+    items = visible_assignments(current_user(), gid)
 
     stats = {
         "overdue": sum(1 for i in items if i["todo"] and i["overdue"]),
@@ -859,6 +869,183 @@ def group_delete(gid):
     db().execute("DELETE FROM class_groups WHERE id = ?", (gid,))
     db().commit()
     return redirect(url_for("groups"))
+
+
+# ---------- JSON API v1 ----------
+# Read-only. Auth is HTTP Basic: NRP as the username, your tracker password as the password.
+# (An NRP alone isn't a secret, so it can't be the only credential.)
+
+API_FAIL_LIMIT = 10      # wrong passwords allowed per (ip, nrp)...
+API_FAIL_WINDOW = 300    # ...within this many seconds
+_api_fails = {}
+_DUMMY_HASH = generate_password_hash("not-a-real-password")  # equalises timing for unknown NRPs
+
+
+def api_error(status, message, **headers):
+    resp = jsonify(error=message, status=status)
+    resp.status_code = status
+    for k, v in headers.items():
+        resp.headers[k.replace("_", "-")] = str(v)
+    return resp
+
+
+def api_auth(view):
+    @wraps(view)
+    def wrapped(*a, **kw):
+        auth = request.authorization
+        if auth is None or auth.type != "basic" or not auth.username:
+            return api_error(401, "Use HTTP Basic auth: your NRP as username and your tracker password.",
+                             WWW_Authenticate='Basic realm="tracker"')
+        nrp, now = auth.username.strip(), time.time()
+        key = (request.remote_addr, nrp)
+        recent = [t for t in _api_fails.get(key, []) if now - t < API_FAIL_WINDOW]
+        if len(recent) >= API_FAIL_LIMIT:
+            return api_error(429, "Too many failed attempts. Try again later.",
+                             Retry_After=int(API_FAIL_WINDOW - (now - recent[0])) + 1)
+        user = db().execute("SELECT * FROM users WHERE nrp = ?", (nrp,)).fetchone()
+        ok = check_password_hash(user["password_hash"] if user else _DUMMY_HASH, auth.password or "")
+        if not (user and ok):
+            _api_fails[key] = recent + [now]
+            if len(_api_fails) > 2000:  # don't grow forever
+                for k in [k for k, v in _api_fails.items() if now - v[-1] > API_FAIL_WINDOW]:
+                    del _api_fails[k]
+            return api_error(401, "Wrong NRP or password.", WWW_Authenticate='Basic realm="tracker"')
+        _api_fails.pop(key, None)
+        if user["must_change"]:
+            return api_error(403, "Log in on the website and change your default password first.")
+        g.api_nrp = nrp
+        return view(*a, **kw)
+    return wrapped
+
+
+@app.after_request
+def api_headers(resp):
+    if request.path.startswith("/v1"):
+        resp.headers["Cache-Control"] = "no-store"
+        resp.headers["Vary"] = "Authorization"
+    return resp
+
+
+@app.errorhandler(404)
+@app.errorhandler(405)
+def api_http_errors(e):
+    if request.path.startswith("/v1"):
+        return api_error(e.code, "Not found." if e.code == 404 else "Method not allowed. The API is read-only (GET).")
+    return e
+
+
+def api_person(nrp):
+    return {"nrp": nrp, "name": names().get(nrp)}
+
+
+def api_assignment(i):
+    return {
+        "id": i["id"],
+        "title": i["title"],
+        "description": i["description"],
+        "link": i["link"] or None,
+        "deadline": i["dl"].astimezone().isoformat(timespec="seconds"),  # local server time, with UTC offset
+        "due_in_seconds": int(i["delta"]),                                # negative = overdue
+        "overdue": i["overdue"],
+        "done": i["done"],
+        "group": {"id": i["group_id"], "name": i["group_name"]} if i["group_id"] else None,
+        "created_by": api_person(i["created_by"]),
+        "created_at": i["created_at"],
+    }
+
+
+def api_int(name, lo, hi):
+    """Optional integer query param; returns (value, error_response)."""
+    raw = request.args.get(name)
+    if raw is None or raw == "":
+        return None, None
+    try:
+        val = int(raw)
+    except ValueError:
+        return None, api_error(400, f"'{name}' must be an integer.")
+    if not lo <= val <= hi:
+        return None, api_error(400, f"'{name}' must be between {lo} and {hi}.")
+    return val, None
+
+
+def api_list(items):
+    return jsonify(generated_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+                   user=api_person(g.api_nrp), count=len(items),
+                   assignments=[api_assignment(i) for i in items])
+
+
+@app.route("/v1/")
+@app.route("/v1")
+def api_index():
+    return jsonify(
+        version=1,
+        auth="HTTP Basic: NRP as username, your tracker password as password",
+        endpoints={
+            "GET /v1/me": "who you are and the groups you're in",
+            "GET /v1/due": "not-done assignments that are still upcoming. "
+                           "Params: days=N (only the next N days), overdue=1 (also include overdue), group=ID",
+            "GET /v1/assignments": "everything you can see. Params: status=todo|done|all (default all), group=ID",
+            "GET /v1/groups": "your groups with member and assignment counts",
+        },
+    )
+
+
+@app.route("/v1/me")
+@api_auth
+def api_me():
+    rows = db().execute(
+        """SELECT g.id, g.name, g.is_public, g.is_default, m.is_admin FROM class_groups g
+           JOIN group_members m ON m.group_id = g.id AND m.nrp = ?
+           ORDER BY g.is_default DESC, g.name COLLATE NOCASE""", (g.api_nrp,)).fetchall()
+    return jsonify(**api_person(g.api_nrp), admin_of_web=g.api_nrp in ADMINS,
+                   groups=[{"id": r["id"], "name": r["name"], "admin": bool(r["is_admin"])} for r in rows])
+
+
+@app.route("/v1/due")
+@api_auth
+def api_due():
+    days, err = api_int("days", 0, 365)
+    if err:
+        return err
+    gid, err = api_int("group", 1, 2**31)
+    if err:
+        return err
+    include_overdue = request.args.get("overdue") in ("1", "true", "yes")
+    items = [i for i in visible_assignments(g.api_nrp, gid)
+             if i["todo"] and (include_overdue or not i["overdue"])
+             and (days is None or i["overdue"] or i["delta"] <= days * 86400)]
+    return api_list(items)
+
+
+@app.route("/v1/assignments")
+@api_auth
+def api_assignments():
+    status = request.args.get("status", "all")
+    if status not in ("todo", "done", "all"):
+        return api_error(400, "'status' must be todo, done or all.")
+    gid, err = api_int("group", 1, 2**31)
+    if err:
+        return err
+    items = visible_assignments(g.api_nrp, gid)
+    if status == "done":
+        items = [i for i in items if i["done"]]
+    elif status == "todo":
+        items = [i for i in items if i["todo"]]
+    return api_list(items)
+
+
+@app.route("/v1/groups")
+@api_auth
+def api_groups():
+    rows = db().execute(
+        """SELECT g.id, g.name, g.is_public, g.is_default, m.is_admin,
+             (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) AS members,
+             (SELECT COUNT(*) FROM assignments WHERE group_id = g.id) AS assignments
+           FROM class_groups g JOIN group_members m ON m.group_id = g.id AND m.nrp = ?
+           ORDER BY g.is_default DESC, g.name COLLATE NOCASE""", (g.api_nrp,)).fetchall()
+    return jsonify(user=api_person(g.api_nrp), count=len(rows), groups=[
+        {"id": r["id"], "name": r["name"], "public": bool(r["is_public"]), "admin": bool(r["is_admin"]),
+         "members": r["members"], "assignments": r["assignments"]} for r in rows])
 
 
 if __name__ == "__main__":
