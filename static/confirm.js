@@ -36,19 +36,27 @@
             var form = pending;
             pending = null;
             dlg.close();
-            if (form) form.submit();          // submit() doesn't fire the submit event, so no loop
+            if (form) resubmit(form);
         });
         dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });   // click on the backdrop
         dlg.addEventListener('close', function () { pending = null; });
     }
 
+    // after OK, submit again with a marker so we don't ask twice; requestSubmit() fires the submit
+    // event, which lets app.js send it in the background instead of reloading the page
+    function resubmit(form) {
+        form.setAttribute('data-confirmed', '1');
+        if (form.requestSubmit) form.requestSubmit(); else form.submit();
+    }
+
     document.addEventListener('submit', function (e) {
         var form = e.target;
         if (!form.matches || !form.matches('form[data-confirm]')) return;
+        if (form.hasAttribute('data-confirmed')) { form.removeAttribute('data-confirmed'); return; }
         e.preventDefault();
         var message = form.getAttribute('data-confirm');
         if (typeof HTMLDialogElement === 'undefined') {
-            if (window.confirm(message)) form.submit();
+            if (window.confirm(message)) resubmit(form);
             return;
         }
         if (!dlg) build();

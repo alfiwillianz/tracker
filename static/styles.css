@@ -711,3 +711,94 @@ dialog.confirm[open] { animation: confirm-in 0.15s ease-out; }
 .member-filter input::-webkit-search-cancel-button { filter: invert(0.6); }
 .members li.empty-row { display: block; padding: 18px 0; text-align: center; }
 .match-count { margin: 10px 0 0; font-size: 13px; }
+
+/* live member list: dim while a request is in flight */
+#member-list { transition: opacity 0.12s ease; }
+#member-list.loading { opacity: 0.55; }
+
+
+/* ---------- dynamic navigation (app.js) ---------- */
+.progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 1000; pointer-events: none; opacity: 0; }
+.progress i { display: block; height: 100%; width: 0; background: var(--blue); box-shadow: 0 0 10px var(--blue); border-radius: 0 3px 3px 0; }
+.progress.run { opacity: 1; }
+.progress.run i { width: 85%; transition: width 6s cubic-bezier(0.1, 0.6, 0.2, 1); }
+.progress.done { opacity: 0; transition: opacity 0.3s ease 0.2s; }
+.progress.done i { width: 100%; transition: width 0.2s ease; }
+
+/* dim the page only if loading takes a moment, so quick loads don't flicker */
+main { transition: opacity 0.15s ease; }
+html.is-loading main { opacity: 0.6; transition-delay: 0.12s; }
+html.is-loading, html.is-loading a, html.is-loading button { cursor: progress; }
+
+/* page enter: fade the page, then let the content rise in one piece at a time */
+@keyframes page-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+main.page-enter { animation: page-in 0.2s ease-out both; }
+main.page-enter .page > *, main.page-enter .welcome-box { animation: rise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+main.page-enter .page > :nth-child(1) { animation-delay: 40ms; }
+main.page-enter .page > :nth-child(2) { animation-delay: 80ms; }
+main.page-enter .page > :nth-child(3) { animation-delay: 120ms; }
+main.page-enter .page > :nth-child(4) { animation-delay: 160ms; }
+main.page-enter .page > :nth-child(5) { animation-delay: 200ms; }
+main.page-enter .page > :nth-child(6) { animation-delay: 240ms; }
+main.page-enter .page > :nth-child(7) { animation-delay: 280ms; }
+main.page-enter .page > :nth-child(8) { animation-delay: 320ms; }
+main.page-enter .page > :nth-child(9) { animation-delay: 360ms; }
+main.page-enter .page > :nth-child(10) { animation-delay: 400ms; }
+main.page-enter .page > :nth-child(11) { animation-delay: 440ms; }
+main.page-enter .page > :nth-child(12) { animation-delay: 480ms; }
+main.page-enter .page > :nth-child(13) { animation-delay: 520ms; }
+main.page-enter .page > :nth-child(14) { animation-delay: 520ms; }
+
+/* actions: instant feedback before the server answers */
+@keyframes collapse {
+    0%   { opacity: 1; transform: none; max-height: 400px; }
+    60%  { opacity: 0; transform: translateX(28px); max-height: 400px; }
+    100% { opacity: 0; transform: translateX(28px); max-height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+}
+.card.removing { animation: collapse 0.26s ease-in forwards; overflow: hidden; pointer-events: none; }
+@keyframes pop { 0% { transform: scale(0.8); } 55% { transform: scale(1.18); } 100% { transform: scale(1); } }
+.check.pop { animation: pop 0.28s ease-out; }
+
+button, .button, .chip, .seg a, .pager .pages a { transition: background-color 0.2s, border-color 0.15s, color 0.15s, transform 0.1s; }
+button:active:not(:disabled), .button:active { transform: scale(0.97); }
+a.group-card:hover { box-shadow: 0 0 20px rgba(255, 255, 255, 0.14); }
+
+button.busy { position: relative; color: transparent !important; pointer-events: none; }
+button.busy::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* toasts (flash messages) */
+.toasts { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 900; display: flex; flex-direction: column; gap: 8px; width: calc(100% - 32px); max-width: 420px; pointer-events: none; }
+.toast {
+    pointer-events: auto;
+    cursor: pointer;
+    padding: 12px 16px;
+    background: var(--field);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--amber);
+    border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), var(--glow);
+    font-size: 14px;
+    line-height: 1.45;
+    animation: toast-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.toast.out { animation: toast-out 0.25s ease-in forwards; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(8px) scale(0.97); } }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; animation-delay: 0ms !important; transition-duration: 0.001ms !important; }
+    .progress.run i { transition: none; }
+}

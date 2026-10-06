@@ -15,57 +15,11 @@
 <div class="project-tile card plain">
     <div class="card-body">
         <form method="get" action="{{ url_for('group_view', gid=group.id, _anchor='members') }}" class="member-filter" role="search">
-            <input type="search" name="q" value="{{ q }}" placeholder="Filter members by name or NRP…" autocomplete="off" aria-label="Filter members" data-autosubmit>
+            <input type="search" name="q" value="{{ q }}" placeholder="Filter members by name or NRP…" autocomplete="off" aria-label="Filter members" data-live-filter>
         </form>
-        <ul class="members">
-            {% for m in members %}
-            <li>
-                <span class="who">
-                    {{ m.nrp|who }}{% if m.nrp|who != m.nrp %} <small class="muted">{{ m.nrp }}</small>{% endif %}
-                    {% if m.nrp == me %}<em>(you)</em>{% endif %}
-                    {% if m.is_admin %}<span class="chip small">admin</span>{% endif %}
-                    {% if m.nrp == group.created_by %}<span class="chip small grp">creator</span>{% endif %}
-                </span>
-                {% if m.nrp != me and manage %}
-                <details class="kebab">
-                    <summary aria-label="Actions for {{ m.nrp|who }}" title="Actions">⋯</summary>
-                    <div class="menu">
-                        <form method="post" action="{{ url_for('group_role', gid=group.id) }}">
-                            <input type="hidden" name="csrf" value="{{ csrf }}">
-                            <input type="hidden" name="nrp" value="{{ m.nrp }}">
-                            <input type="hidden" name="admin" value="{{ 0 if m.is_admin else 1 }}">
-                            <input type="hidden" name="page" value="{{ page }}">
-                            <input type="hidden" name="q" value="{{ q }}">
-                            <button type="submit">{{ 'Remove as admin' if m.is_admin else 'Make admin' }}</button>
-                        </form>
-                        <form method="post" action="{{ url_for('group_remove', gid=group.id) }}" data-confirm="Remove {{ m.nrp|who }} from {{ group.name }}? They'll stop seeing this group's assignments." data-confirm-title="Remove member?" data-confirm-ok="Remove">
-                            <input type="hidden" name="csrf" value="{{ csrf }}">
-                            <input type="hidden" name="nrp" value="{{ m.nrp }}">
-                            <input type="hidden" name="page" value="{{ page }}">
-                            <input type="hidden" name="q" value="{{ q }}">
-                            <button type="submit" class="danger">Remove from group</button>
-                        </form>
-                    </div>
-                </details>
-                {% endif %}
-            </li>
-            {% else %}
-            <li class="empty-row muted">No members match “{{ q }}”. <a href="{{ url_for('group_view', gid=group.id, _anchor='members') }}">Clear filter</a></li>
-            {% endfor %}
-        </ul>
-        {% if q and pages == 1 %}<p class="muted match-count">{{ shown_count }} match{{ '' if shown_count == 1 else 'es' }}</p>{% endif %}
-        {% if pages > 1 %}
-        <nav class="pager" aria-label="Members pages">
-            <span class="muted">{{ first }}–{{ first + members|length - 1 }} of {{ shown_count }}{% if q %} matching{% endif %}</span>
-            <span class="pages">
-                {% if page > 1 %}<a href="{{ url_for('group_view', gid=group.id, page=page - 1, q=q or None, _anchor='members') }}" rel="prev">‹ Prev</a>{% else %}<span class="off">‹ Prev</span>{% endif %}
-                {% for n in range(1, pages + 1) %}
-                <a href="{{ url_for('group_view', gid=group.id, page=n, q=q or None, _anchor='members') }}" class="{{ 'active' if n == page }}" {{ 'aria-current=page' if n == page }}>{{ n }}</a>
-                {% endfor %}
-                {% if page < pages %}<a href="{{ url_for('group_view', gid=group.id, page=page + 1, q=q or None, _anchor='members') }}" rel="next">Next ›</a>{% else %}<span class="off">Next ›</span>{% endif %}
-            </span>
-        </nav>
-        {% endif %}
+        <div id="member-list" aria-live="polite">
+            {% include "_member_list.html" %}
+        </div>
     </div>
 </div>
 

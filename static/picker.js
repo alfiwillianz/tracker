@@ -1,5 +1,7 @@
 // Filterable multi-select for [data-picker] blocks (checkboxes stay the source of truth).
-document.querySelectorAll('[data-picker]').forEach(function (root) {
+var App = window.App || { init: function (fn) { fn(document); } };   // app.js re-runs this on every page swap
+App.init(function (scope) {
+scope.querySelectorAll('[data-picker]').forEach(function (root) {
     var search = root.querySelector('[data-search]');
     var items = Array.prototype.slice.call(root.querySelectorAll('.picker-item'));
     var chips = root.querySelector('[data-chips]');
@@ -56,4 +58,5 @@ document.querySelectorAll('[data-picker]').forEach(function (root) {
         render();
     });
     render();
+});
 });

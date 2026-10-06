@@ -1,7 +1,9 @@
 // Styled dropdown for <select data-fancy>, optionally with a filter box (data-filter).
 // The native select stays in the form as the source of truth (and as the fallback if this
 // script fails), we only draw a nicer picker on top of it.
-document.querySelectorAll('select[data-fancy]').forEach(function (sel) {
+var App = window.App || { init: function (fn) { fn(document); } };   // app.js re-runs this on every page swap
+App.init(function (scope) {
+scope.querySelectorAll('select[data-fancy]').forEach(function (sel) {
     var filterable = sel.hasAttribute('data-filter');
 
     var wrap = document.createElement('div');
@@ -139,7 +141,10 @@ document.querySelectorAll('select[data-fancy]').forEach(function (sel) {
         search.addEventListener('keydown', onKey);
         search.addEventListener('input', applyFilter);
     }
-    document.addEventListener('click', function (e) { if (!wrap.contains(e.target)) close(); });
+    document.addEventListener('click', function outside(e) {
+        if (!document.contains(wrap)) { document.removeEventListener('click', outside); return; }   // page was swapped away
+        if (!wrap.contains(e.target)) close();
+    });
 
     // clicking the label should focus the visible control, not the hidden select
     var label = sel.id && document.querySelector('label[for="' + sel.id + '"]');
@@ -151,4 +156,5 @@ document.querySelectorAll('select[data-fancy]').forEach(function (sel) {
     wrap.appendChild(sel);
     sync();
     sel.classList.add('fselect-native');   // hide the native one last: if anything above threw, it stays usable
+});
 });

@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from werkzeug.middleware.proxy_fix import ProxyFix
-from flask import (Flask, abort, flash, g, redirect, render_template, request,
-                   session, url_for)
+from flask import (Flask, abort, flash, g, make_response, redirect, render_template,
+                   request, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
@@ -756,11 +756,16 @@ def group_view(gid):
         params + [MEMBERS_PER_PAGE, (page - 1) * MEMBERS_PER_PAGE]).fetchall()
     total = db().execute(
         "SELECT COUNT(*) FROM assignments WHERE group_id = ?", (gid,)).fetchone()[0]
-    return render_template("group.html", group=group, members=members, total=total,
-                           manage=can_manage(group), is_member=current_user() in all_nrps,
-                           people=people(all_nrps), member_count=member_count,
-                           shown_count=shown_count, q=q,
-                           page=page, pages=pages, first=(page - 1) * MEMBERS_PER_PAGE + 1)
+    ctx = dict(group=group, members=members, total=total,
+               manage=can_manage(group), is_member=current_user() in all_nrps,
+               people=people(all_nrps), member_count=member_count,
+               shown_count=shown_count, q=q,
+               page=page, pages=pages, first=(page - 1) * MEMBERS_PER_PAGE + 1)
+    # live filter/pager (members.js) asks for just the list; everyone else gets the page
+    live = request.headers.get("X-Requested-With") == "fetch"
+    resp = make_response(render_template("_member_list.html" if live else "group.html", **ctx))
+    resp.headers["Vary"] = "X-Requested-With"
+    return resp
 
 
 def members_url(gid):
