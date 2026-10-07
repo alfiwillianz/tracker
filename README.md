@@ -19,12 +19,10 @@ Flask + SQLite, server-rendered, with a small amount of plain JavaScript (no fra
 ## Quick start
 
 ```bash
-cp .env.example .env                # put your Cloudflare tunnel token in .env (see "Public access")
 docker compose up -d --build        # app on http://127.0.0.1:5000
 ```
 
-`docker-compose.yml` also defines the Cloudflare tunnel, and Compose refuses to start **any** service while `CF_TUNNEL_TOKEN` is unset.
-To try the app without a tunnel, put any placeholder value in `.env`, or use the no-Docker route below.
+The compose file runs only the app, bound to `127.0.0.1:5000`. To reach it from the internet, see [Public access](#public-access).
 
 First-run login: any seeded NRP (`5054251001` … `5054251051`) with password `123456`, then pick a new one.
 
@@ -50,7 +48,6 @@ Environment variables (set in `docker-compose.yml`):
 | `TRUST_PROXY` | off | `1` when behind a reverse proxy / tunnel, so client IPs and HTTPS are read from its headers. |
 | `COOKIE_SECURE` | off | `1` to mark the session cookie HTTPS-only. Use it with a tunnel/HTTPS; it breaks plain-HTTP logins. |
 | `TZ` | — | Timezone for deadlines and "due in…" (`Asia/Jakarta` in compose). |
-| `CF_TUNNEL_TOKEN` | — | In `.env`, for the Cloudflare tunnel container. |
 
 ### Student names
 
@@ -66,15 +63,21 @@ The seeded NRP range is `5054251` + `001`…`051`; accounts listed in `REMOVED_U
 
 ## Public access
 
-`docker-compose.yml` runs `cloudflared` next to the app. Create a tunnel in the Cloudflare Zero Trust dashboard, then:
+`docker-compose.yml` does **not** start a tunnel or proxy: the app listens on `127.0.0.1:5000` only. Put anything that can reach that port in front of it. With a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/):
 
-```bash
-cp .env.example .env                # put the tunnel token in .env
-# In the dashboard, add a Public Hostname pointing at  http://tracker:5000
-docker compose up -d --build
-```
+1. In the Cloudflare Zero Trust dashboard, create a tunnel and add a **Public Hostname** whose service is `http://localhost:5000`. Copy the tunnel token.
+2. Run `cloudflared` on the same machine, for example in Docker with host networking (so `localhost` is the host):
 
-The app port is bound to `127.0.0.1` only; public traffic goes through the tunnel. Static files are served with a `?v=<mtime>` suffix, so Cloudflare and browsers pick up new CSS/JS after a deploy.
+   ```bash
+   docker run -d --name tracker-tunnel --restart unless-stopped --network host \
+     cloudflare/cloudflared:latest tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN"
+   ```
+
+   or install `cloudflared` and run `cloudflared tunnel run --token "$CF_TUNNEL_TOKEN"`.
+
+Keep the token out of git (the repo's `.gitignore` already ignores `.env`, a fine place for it). Behind a tunnel or proxy, set `TRUST_PROXY=1` and `COOKIE_SECURE=1` (already set in `docker-compose.yml`) so the app sees the real client address and scheme.
+
+Static files are served with a `?v=<mtime>` suffix, so Cloudflare and browsers pick up new CSS/JS after a deploy.
 
 ## Data and backups
 
