@@ -12,13 +12,3 @@ services:
       - "127.0.0.1:5000:5000"  # local only; public traffic comes through the tunnel
     volumes:
       - ./data:/data
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: tracker-tunnel
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    environment:
-      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in .env}
-    depends_on:
-      - tracker
