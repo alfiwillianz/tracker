@@ -882,3 +882,14 @@ button.small.danger:hover { background: #7a3030; }
 /* docs link sits at the far end of the key buttons */
 .button-container .docs-btn { margin-left: auto; background: transparent; border: 1px solid #444; color: var(--soft); }
 .button-container .docs-btn:hover { background: rgba(255, 255, 255, 0.06); border-color: #666; color: #fff; text-decoration: none; }
+
+/* ---------- error pages (404 & friends) ---------- */
+.errorpage { text-align: center; padding: 8px 0 4px; }
+.errorpage .code { margin: 0; font-size: 96px; font-weight: 700; line-height: 1; letter-spacing: -3px; color: #fff; }
+.errorpage .code span { color: var(--blue); display: inline-block; animation: bob 2.4s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-6px); } }
+.errorpage h1 { margin: 14px 0 8px; font-size: 26px; }
+.errorpage .lead { margin: 0 auto 10px; max-width: 34ch; }
+.errorpage code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; background: var(--field); border: 1px solid #333; border-radius: 6px; padding: 2px 8px; overflow-wrap: anywhere; }
+.errorpage .button-container { justify-content: center; margin-top: 22px; }
+@media screen and (max-width: 767px) { .errorpage .code { font-size: 76px; } }

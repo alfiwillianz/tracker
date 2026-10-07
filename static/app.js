@@ -98,7 +98,9 @@
             return r.text().then(function (html) { return { r: r, html: html }; });
         }).then(function (x) {
             if (mine !== seq) return;
-            if (!x.r.ok) throw { fallback: true, status: x.r.status };
+            // a failed POST can't be replayed: tell the user. A failed GET is our own styled error page
+            // (it has a <main>), so show it in place; swap() does a real page load if it isn't one.
+            if (!x.r.ok && opts.body) throw { fallback: true, status: x.r.status };
             swap(x.html, x.r.url || url, opts);
             finish();
         }).catch(function (err) {

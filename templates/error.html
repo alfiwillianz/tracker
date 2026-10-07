@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} · {{ title }} - tracker{% endblock %}
+{% block boxclass %}welcome-box narrow{% endblock %}
+{% block content %}
+<div class="errorpage">
+    <p class="code" aria-hidden="true">{{ code }}<span>;</span></p>
+    <h1>{{ title }}</h1>
+    <p class="lead">{{ message }}</p>
+    {% if code == 404 %}<p class="muted"><code>{{ path }}</code></p>{% endif %}
+    <div class="button-container">
+        {% if me %}
+        <a class="button primary" href="{{ url_for('index') }}">Back to assignments</a>
+        <a class="button" href="{{ url_for('groups') }}">Groups</a>
+        {% else %}
+        <a class="button primary" href="{{ url_for('login') }}">Log in</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

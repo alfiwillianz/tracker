@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 import markdown
+from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask import (Flask, abort, flash, g, jsonify, make_response, redirect, render_template,
                    request, session, url_for)
@@ -1058,12 +1059,30 @@ def api_headers(resp):
     return resp
 
 
-@app.errorhandler(404)
-@app.errorhandler(405)
-def api_http_errors(e):
+ERROR_TEXT = {
+    400: ("Bad request", "Something about that request didn't look right. Reload the page and try again."),
+    403: ("Not allowed", "You don't have permission to do that."),
+    404: ("Page not found", "That page doesn't exist, or you don't have access to it."),
+    405: ("Wrong method", "That page can't be used that way."),
+    429: ("Slow down", "Too many requests. Give it a moment and try again."),
+    500: ("Something broke", "That one's on us. Try again in a moment."),
+}
+
+
+@app.errorhandler(HTTPException)
+def http_errors(e):
+    """One place for every HTTP error: JSON under /v1, a styled page everywhere else.
+    (Flask also routes unhandled exceptions here as 500, so internals are never shown.)"""
     if request.path.startswith("/v1"):
-        return api_error(e.code, "Not found." if e.code == 404 else "Method not allowed. The API is read-only (GET).")
-    return e
+        msg = {404: "Not found.", 405: "Method not allowed. The API is read-only (GET)."}.get(e.code, f"{e.name}.")
+        resp = api_error(e.code, msg)
+    else:
+        title, message = ERROR_TEXT.get(e.code, (e.name, "Something went wrong."))
+        resp = make_response(render_template("error.html", code=e.code, title=title, message=message,
+                                             path=request.path), e.code)
+    if getattr(e, "valid_methods", None):          # 405 must say what *is* allowed
+        resp.headers["Allow"] = ", ".join(e.valid_methods)
+    return resp
 
 
 def api_person(nrp):
