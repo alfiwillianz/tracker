@@ -16,6 +16,7 @@
             <nav>
                 <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint in ('index', 'add', 'edit') }}">Assignments</a>
                 <a href="{{ url_for('groups') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('group') }}">Groups</a>
+                <a href="{{ url_for('account') }}" class="{{ 'active' if request.endpoint == 'account' }}">Account</a>
             </nav>
             {% endif %}
         </div>
@@ -39,5 +40,6 @@
     <script src="{{ url_for('static', filename='select.js') }}" defer></script>
     <script src="{{ url_for('static', filename='confirm.js') }}" defer></script>
     <script src="{{ url_for('static', filename='members.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='copy.js') }}" defer></script>
 </body>
 </html>

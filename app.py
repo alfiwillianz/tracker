@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 import secrets
@@ -6,6 +7,7 @@ import time
 from datetime import datetime, timedelta
 from functools import wraps
 
+import markdown
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask import (Flask, abort, flash, g, jsonify, make_response, redirect, render_template,
                    request, session, url_for)
@@ -121,6 +123,13 @@ def init_db():
             assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
             nrp TEXT NOT NULL REFERENCES users(nrp),
             PRIMARY KEY (assignment_id, nrp)
+        );
+        CREATE TABLE IF NOT EXISTS api_keys (
+            nrp TEXT PRIMARY KEY REFERENCES users(nrp) ON DELETE CASCADE,
+            key_hash TEXT NOT NULL UNIQUE,
+            hint TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT
         );
         CREATE TABLE IF NOT EXISTS completions (
             nrp TEXT NOT NULL REFERENCES users(nrp),
@@ -406,32 +415,89 @@ def logout():
     return redirect(url_for("login"))
 
 
+def set_password(user, current, new, confirm):
+    """Validate and apply a password change. Returns an error message, or None on success."""
+    if not check_password_hash(user["password_hash"], current):
+        return "Current password is wrong."
+    if len(new) < 8:
+        return "New password must be at least 8 characters."
+    if new == DEFAULT_PASSWORD or new == current:
+        return "Pick a password different from the old one."
+    if new != confirm:
+        return "Passwords don't match."
+    db().execute("UPDATE users SET password_hash = ?, must_change = 0 WHERE nrp = ?",
+                 (generate_password_hash(new), user["nrp"]))
+    db().commit()
+    return None
+
+
 @app.route("/change-password", methods=["GET", "POST"])
 @login_required
 def change_password():
+    """Only for the forced first-login change; everyone else uses /account."""
     user = db().execute("SELECT * FROM users WHERE nrp = ?", (current_user(),)).fetchone()
-    forced = bool(user["must_change"])
+    if not user["must_change"]:
+        return redirect(url_for("account"))
     if request.method == "POST":
-        current = request.form.get("current", "")
-        new = request.form.get("new", "")
-        confirm = request.form.get("confirm", "")
-        if not check_password_hash(user["password_hash"], current):
-            flash("Current password is wrong.")
-        elif len(new) < 8:
-            flash("New password must be at least 8 characters.")
-        elif new == DEFAULT_PASSWORD or new == current:
-            flash("Pick a password different from the old one.")
-        elif new != confirm:
-            flash("Passwords don't match.")
+        err = set_password(user, request.form.get("current", ""), request.form.get("new", ""),
+                           request.form.get("confirm", ""))
+        if err:
+            flash(err)
         else:
-            db().execute(
-                "UPDATE users SET password_hash = ?, must_change = 0 WHERE nrp = ?",
-                (generate_password_hash(new), current_user()),
-            )
-            db().commit()
             flash("Password updated.")
             return redirect(url_for("index"))
-    return render_template("change_password.html", forced=forced)
+    return render_template("change_password.html", forced=True)
+
+
+# ---------- account: password + API key ----------
+
+def key_hash(key):
+    return hashlib.sha256(key.encode()).hexdigest()   # keys are 256-bit random, so a fast hash is fine
+
+
+def issue_key(nrp):
+    """Create (or replace) the user's API key. The plaintext is returned once and never stored."""
+    key = "trk_" + secrets.token_urlsafe(32)
+    db().execute(
+        """INSERT INTO api_keys (nrp, key_hash, hint, created_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(nrp) DO UPDATE SET key_hash = excluded.key_hash, hint = excluded.hint,
+                                          created_at = excluded.created_at, last_used_at = NULL""",
+        (nrp, key_hash(key), key[:8], datetime.now().isoformat(timespec="seconds")))
+    db().commit()
+    return key
+
+
+def fmt_when(iso):
+    return datetime.fromisoformat(iso).strftime("%d %b %Y, %H:%M") if iso else None
+
+
+@app.route("/account", methods=["GET", "POST"])
+@login_required
+def account():
+    me = current_user()
+    new_key = None
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "password":
+            user = db().execute("SELECT * FROM users WHERE nrp = ?", (me,)).fetchone()
+            err = set_password(user, request.form.get("current", ""), request.form.get("new", ""),
+                               request.form.get("confirm", ""))
+            flash(err or "Password updated.")
+            if not err:
+                return redirect(url_for("account"))
+        elif action == "key":
+            new_key = issue_key(me)           # shown once, in this response only (no redirect, nothing stored)
+        elif action == "revoke":
+            db().execute("DELETE FROM api_keys WHERE nrp = ?", (me,))
+            db().commit()
+            flash("API key revoked.")
+            return redirect(url_for("account"))
+        else:
+            abort(400)
+    row = db().execute("SELECT * FROM api_keys WHERE nrp = ?", (me,)).fetchone()
+    key = {"hint": row["hint"], "created": fmt_when(row["created_at"]),
+           "last_used": fmt_when(row["last_used_at"])} if row else None
+    return render_template("account.html", key=key, new_key=new_key, api_base=request.host_url.rstrip("/"))
 
 
 MEMBERS_PER_PAGE = 10
@@ -871,55 +937,121 @@ def group_delete(gid):
     return redirect(url_for("groups"))
 
 
-# ---------- JSON API v1 ----------
-# Read-only. Auth is HTTP Basic: NRP as the username, your tracker password as the password.
-# (An NRP alone isn't a secret, so it can't be the only credential.)
+# ---------- API docs page ----------
+# Served from docs/api.md so there is one source of truth. Public (no private data in it) and
+# deliberately not linked from the site header: it's reached via /docs or from the API's own responses.
 
-API_FAIL_LIMIT = 10      # wrong passwords allowed per (ip, nrp)...
+DOCS_FILE = os.path.join(os.path.dirname(__file__), "docs", "api.md")
+_docs_cache = {}
+
+
+DOCS_PLACEHOLDER = "https://tracker.example.com"
+_SAFE_BASE = re.compile(r"^https?://[A-Za-z0-9.\-]+(:\d{1,5})?$|^https?://\[[0-9A-Fa-f:.]+\](:\d{1,5})?$")
+
+
+def render_docs(base_url):
+    # base_url comes from the request's Host header: only use it if it looks like a plain host[:port],
+    # otherwise keep the generic placeholder (stops markup injected via a crafted Host header)
+    if not _SAFE_BASE.match(base_url):
+        base_url = DOCS_PLACEHOLDER
+    mtime = os.stat(DOCS_FILE).st_mtime
+    cached = _docs_cache.get(base_url)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    with open(DOCS_FILE, encoding="utf-8") as f:
+        text = f.read().replace(DOCS_PLACEHOLDER, base_url)   # every example points at the address you used
+    md = markdown.Markdown(extensions=["fenced_code", "tables", "toc"])   # toc only gives headings ids (#anchors)
+    html = md.convert(text)
+    if len(_docs_cache) >= 16:      # one entry per distinct host seen; keep it bounded
+        _docs_cache.clear()
+    _docs_cache[base_url] = (mtime, html)
+    return html
+
+
+@app.route("/docs")
+def docs():
+    try:
+        html = render_docs(request.host_url.rstrip("/"))
+    except FileNotFoundError:
+        abort(404)
+    return render_template("docs.html", body=html)
+
+
+# ---------- JSON API v1 ----------
+# Read-only. Auth is a personal API key (made on the Account page), sent as a Bearer token or as the
+# password of HTTP Basic (NRP as username). An NRP alone isn't a secret, so it can't be the credential,
+# and the website password is never used here so scripts don't have to hold it.
+
+API_FAIL_LIMIT = 10      # wrong keys allowed per (ip, nrp)...
 API_FAIL_WINDOW = 300    # ...within this many seconds
 _api_fails = {}
-_DUMMY_HASH = generate_password_hash("not-a-real-password")  # equalises timing for unknown NRPs
+
+
+def docs_url():
+    return request.host_url.rstrip("/") + "/docs"
 
 
 def api_error(status, message, **headers):
-    resp = jsonify(error=message, status=status)
+    resp = jsonify(error=message, status=status, docs=docs_url())
     resp.status_code = status
     for k, v in headers.items():
         resp.headers[k.replace("_", "-")] = str(v)
     return resp
 
 
+def api_credentials():
+    """(nrp or None, key) from `Authorization: Bearer <key>` or HTTP Basic with the key as password."""
+    scheme, _, rest = request.headers.get("Authorization", "").partition(" ")
+    if scheme.lower() == "bearer" and rest.strip():
+        return None, rest.strip()
+    auth = request.authorization
+    if auth is not None and auth.type == "basic" and auth.password:
+        return (auth.username or "").strip() or None, auth.password
+    return None, None
+
+
 def api_auth(view):
     @wraps(view)
     def wrapped(*a, **kw):
-        auth = request.authorization
-        if auth is None or auth.type != "basic" or not auth.username:
-            return api_error(401, "Use HTTP Basic auth: your NRP as username and your tracker password.",
-                             WWW_Authenticate='Basic realm="tracker"')
-        nrp, now = auth.username.strip(), time.time()
-        key = (request.remote_addr, nrp)
-        recent = [t for t in _api_fails.get(key, []) if now - t < API_FAIL_WINDOW]
-        if len(recent) >= API_FAIL_LIMIT:
+        nrp_hint, key = api_credentials()
+        challenge = {"WWW_Authenticate": 'Bearer realm="tracker"'}
+        if not key:
+            return api_error(401, "Send your API key: 'Authorization: Bearer <key>' "
+                                  "(or HTTP Basic with your NRP and the key). Make one on the Account page.", **challenge)
+        now = time.time()
+        bucket = (request.remote_addr, nrp_hint or "-")
+        limit = API_FAIL_LIMIT if nrp_hint else API_FAIL_LIMIT * 3   # no NRP given: shared IPs (campus wifi) get more slack
+        recent = [t for t in _api_fails.get(bucket, []) if now - t < API_FAIL_WINDOW]
+        if len(recent) >= limit:
             return api_error(429, "Too many failed attempts. Try again later.",
                              Retry_After=int(API_FAIL_WINDOW - (now - recent[0])) + 1)
-        user = db().execute("SELECT * FROM users WHERE nrp = ?", (nrp,)).fetchone()
-        ok = check_password_hash(user["password_hash"] if user else _DUMMY_HASH, auth.password or "")
-        if not (user and ok):
-            _api_fails[key] = recent + [now]
+        row = db().execute(
+            "SELECT k.nrp, u.must_change FROM api_keys k JOIN users u ON u.nrp = k.nrp WHERE k.key_hash = ?",
+            (key_hash(key),)).fetchone()
+        if row is None or (nrp_hint and nrp_hint != row["nrp"]):
+            _api_fails[bucket] = recent + [now]
             if len(_api_fails) > 2000:  # don't grow forever
                 for k in [k for k, v in _api_fails.items() if now - v[-1] > API_FAIL_WINDOW]:
                     del _api_fails[k]
-            return api_error(401, "Wrong NRP or password.", WWW_Authenticate='Basic realm="tracker"')
-        _api_fails.pop(key, None)
-        if user["must_change"]:
+            return api_error(401, "Invalid API key.", **challenge)
+        _api_fails.pop(bucket, None)
+        if row["must_change"]:
             return api_error(403, "Log in on the website and change your default password first.")
-        g.api_nrp = nrp
+        # remember when it was last used (at most once a minute, to avoid a write per request)
+        stamp = datetime.now().isoformat(timespec="seconds")
+        cutoff = (datetime.now() - timedelta(seconds=60)).isoformat(timespec="seconds")
+        db().execute("UPDATE api_keys SET last_used_at = ? WHERE nrp = ? AND (last_used_at IS NULL OR last_used_at < ?)",
+                     (stamp, row["nrp"], cutoff))
+        db().commit()
+        g.api_nrp = row["nrp"]
         return view(*a, **kw)
     return wrapped
 
 
 @app.after_request
 def api_headers(resp):
+    if request.path == "/account":
+        resp.headers["Cache-Control"] = "no-store"
     if request.path.startswith("/v1"):
         resp.headers["Cache-Control"] = "no-store"
         resp.headers["Vary"] = "Authorization"
@@ -979,7 +1111,8 @@ def api_list(items):
 def api_index():
     return jsonify(
         version=1,
-        auth="HTTP Basic: NRP as username, your tracker password as password",
+        docs=docs_url(),
+        auth="API key: 'Authorization: Bearer <key>' (make one on the Account page)",
         endpoints={
             "GET /v1/me": "who you are and the groups you're in",
             "GET /v1/due": "not-done assignments that are still upcoming. "

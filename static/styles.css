@@ -836,3 +836,49 @@ button.busy::after {
     .check { width: 24px; height: 24px; }
     .page-head h1 { font-size: 24px; }
 }
+
+/* ---------- account page ---------- */
+.lead { margin: 4px 0 14px; color: var(--soft); line-height: 1.55; }
+.fine { font-size: 13px; margin: 12px 0 0; }
+.keybox { background: var(--bg); border: 1px solid rgba(74, 144, 226, 0.5); border-radius: 10px; padding: 14px; margin: 0 0 16px; animation: rise 0.3s ease-out; }
+.keybox p { margin: 0 0 10px; }
+.keyrow { display: flex; gap: 10px; align-items: center; }
+.keyrow code, .codeblock {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--field);
+    border: 1px solid #333;
+    border-radius: 8px;
+}
+.keyrow code { flex: 1; min-width: 0; padding: 10px 12px; font-size: 13px; overflow-wrap: anywhere; user-select: all; color: #fff; }
+.keyrow button { flex: none; }
+.codeblock { margin: 12px 0 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5; color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.keybox .linkbtn { color: var(--blue); font-size: 13px; }
+.keyinfo { list-style: none; margin: 0 0 14px; padding: 0; }
+.keyinfo li { display: flex; gap: 12px; padding: 6px 0; font-size: 14px; border-bottom: 1px solid var(--line); }
+.keyinfo li:last-child { border-bottom: none; }
+.keyinfo .muted { width: 74px; flex: none; }
+.keyinfo code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #fff; }
+button.small.danger { background: #5a2a2a; }
+button.small.danger:hover { background: #7a3030; }
+@media screen and (max-width: 767px) { .keyrow { flex-direction: column; align-items: stretch; } }
+
+/* ---------- docs page (rendered markdown) ---------- */
+.prose { overflow-wrap: anywhere; }
+.prose > .card-body > h1:first-child { display: none; }          /* the page already has an h1 */
+.prose h2 { margin: 28px 0 10px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 22px; }
+.prose h2:first-of-type { margin-top: 4px; border-top: none; }
+.prose h3 { margin: 22px 0 8px; font-size: 17px; }
+.prose p, .prose li { line-height: 1.65; color: var(--soft); }
+.prose ul, .prose ol { padding-left: 22px; }
+.prose code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; background: var(--field); border: 1px solid #333; border-radius: 5px; padding: 1px 6px; color: #fff; }
+.prose pre { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow-x: auto; margin: 12px 0; }
+.prose pre code { background: none; border: none; padding: 0; font-size: 13px; line-height: 1.55; white-space: pre; color: var(--soft); overflow-wrap: normal; }
+.prose table { display: block; overflow-x: auto; border-collapse: collapse; margin: 12px 0; max-width: 100%; }
+.prose th, .prose td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 14px; }
+.prose th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+.prose td code { white-space: nowrap; }
+.prose a { text-decoration: underline; text-underline-offset: 3px; }
+@media screen and (max-width: 767px) { 
+/* docs link sits at the far end of the key buttons */
+.button-container .docs-btn { margin-left: auto; background: transparent; border: 1px solid #444; color: var(--soft); }
+.button-container .docs-btn:hover { background: rgba(255, 255, 255, 0.06); border-color: #666; color: #fff; text-decoration: none; }

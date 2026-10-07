@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}API docs - tracker{% endblock %}
+{% block boxclass %}page docs{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>API docs</h1>
+        <p class="muted">Read-only JSON API. Get your key on the Account page.</p>
+    </div>
+</div>
+<article class="project-tile card plain prose">
+    <div class="card-body">{{ body|safe }}</div>
+</article>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Account - tracker{% endblock %}
+{% block boxclass %}page{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>Account</h1>
+        <p class="muted">{{ me|who }}{% if me|who != me %} · {{ me }}{% endif %}</p>
+    </div>
+    <form method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit" class="small">Log out</button>
+    </form>
+</div>
+
+<h2 class="group" id="password">Password</h2>
+<div class="project-tile card plain">
+    <form method="post" action="{{ url_for('account') }}" class="form grow">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="action" value="password">
+        <input type="password" name="current" placeholder="Current password" autocomplete="current-password" required>
+        <input type="password" name="new" placeholder="New password (min 8 chars)" autocomplete="new-password" minlength="8" required>
+        <input type="password" name="confirm" placeholder="Confirm new password" autocomplete="new-password" minlength="8" required>
+        <div class="button-container"><button type="submit">Update password</button></div>
+    </form>
+</div>
+
+<h2 class="group" id="key">API key</h2>
+<div class="project-tile card plain">
+    <div class="card-body">
+        <p class="lead">Use a key instead of your password in scripts, bots and shortcuts. It only reads (your assignments and groups), and you can revoke it any time.</p>
+
+        {% if new_key %}
+        <div class="keybox" role="status">
+            <p class="muted">Your new key. <strong>Copy it now</strong>, it won't be shown again.</p>
+            <div class="keyrow">
+                <code id="new-key">{{ new_key }}</code>
+                <button type="button" class="small primary" data-copy="#new-key">Copy</button>
+            </div>
+            <pre class="codeblock" id="key-example">curl -H "Authorization: Bearer {{ new_key }}" {{ api_base }}/v1/due</pre>
+            <button type="button" class="linkbtn" data-copy="#key-example">Copy example</button>
+        </div>
+        {% endif %}
+
+        {% if key %}
+        <ul class="keyinfo">
+            <li><span class="muted">Key</span> <code>{{ key.hint }}…</code></li>
+            <li><span class="muted">Created</span> {{ key.created }}</li>
+            <li><span class="muted">Last used</span> {{ key.last_used or 'never' }}</li>
+        </ul>
+        <div class="button-container">
+            <form method="post" action="{{ url_for('account') }}" data-confirm="This makes a new key and the current one stops working right away. Anything using it will need the new key." data-confirm-title="Replace your API key?" data-confirm-ok="Replace">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="action" value="key">
+                <button type="submit" class="small">Regenerate</button>
+            </form>
+            <form method="post" action="{{ url_for('account') }}" data-confirm="The key stops working immediately. You can make a new one whenever you want." data-confirm-title="Revoke your API key?" data-confirm-ok="Revoke">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="action" value="revoke">
+                <button type="submit" class="small danger">Revoke</button>
+            </form>
+            <a href="{{ url_for('docs') }}" class="button small docs-btn">API docs →</a>
+        </div>
+        <p class="muted fine">Changing your password doesn't change your key. Regenerate it if you think it leaked.</p>
+        {% else %}
+        <form method="post" action="{{ url_for('account') }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="action" value="key">
+            <div class="button-container">
+                <button type="submit" class="primary">Generate API key</button>
+                <a href="{{ url_for('docs') }}" class="button docs-btn">API docs →</a>
+            </div>
+        </form>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

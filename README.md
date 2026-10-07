@@ -13,7 +13,8 @@ Flask + SQLite, server-rendered, with a small amount of plain JavaScript (no fra
 - **Groups** — one per course. Private (invite only) or public (listed, one-click join). Group creators are admins and can promote others, remove members, delete the group and delete its assignments. Assignments can also be shared with individual people by NRP.
 - **RKA** — the default group everyone starts in. Only web admins (the `ADMINS` list) manage its members.
 - **No-reload UI** — navigation, forms, live member filtering, a progress bar, animations and toasts. It all degrades to plain page loads without JavaScript.
-- **JSON API** — read-only, for bots and scripts. See [docs/api.md](docs/api.md).
+- **Account page** — change your password and manage your personal API key (shown once, stored hashed, revocable).
+- **JSON API** — read-only, for bots and scripts, authenticated with that key. See [docs/api.md](docs/api.md); the running site serves the same page at `/docs` (public, and deliberately not linked from the header).
 
 ## Quick start
 
@@ -89,7 +90,7 @@ Note that some migrations are one-way — e.g. the old per-assignment `course` c
 ## Security notes
 
 - Passwords are hashed (Werkzeug); every form has a CSRF token; user text is escaped; security headers are set.
-- The web login has no rate limit yet (the API does).
+- API keys are random 256-bit values; only a SHA-256 hash is stored. The API never accepts the website password and failed attempts are rate limited. The web login has no rate limit yet.
 - Everyone knows everyone's NRP and starts on the same default password, so **tell people to change it right after the site goes up**.
 
 ## Layout
@@ -99,7 +100,7 @@ app.py              routes, database, migrations, API
 templates/          Jinja templates (_member_list.html is also served alone to the live filter)
 static/styles.css   all styling
 static/app.js       no-reload navigation, progress bar, toasts
-static/*.js         widgets: picker, select, confirm pop-up, ⋯ menu, live member list
-docs/api.md         API reference
+static/*.js         widgets: picker, select, confirm pop-up, ⋯ menu, live member list, copy button
+docs/api.md         API reference (also rendered at /docs)
 students.tsv        optional names (gitignored)
 ```

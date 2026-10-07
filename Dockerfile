@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py students.tsv* ./
 COPY templates templates
 COPY static static
+COPY docs docs
 
 VOLUME /data
 EXPOSE 5000

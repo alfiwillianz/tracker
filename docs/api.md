@@ -1,22 +1,35 @@
 # API v1
 
-A small, **read-only** JSON API for scripts, bots and widgets (reminders, dashboards, a Discord/Telegram bot, a phone shortcut…).
+A small, **read-only** JSON API for scripts, bots and widgets (reminders, dashboards, a Discord/Telegram bot, a phone shortcut…). You authenticate with a personal API key from the Account page.
 
-Base URL: `https://<your-host>/v1` (locally `http://127.0.0.1:5000/v1`).
+Base URL: `https://tracker.example.com/v1`
 
 ## Authentication
 
-HTTP **Basic** auth: your **NRP** is the username and your **tracker password** is the password.
+Use a personal **API key**. Make one on the website: **Account → API key → Generate**.
+
+- The key is shown **once**, right after you generate it. Copy it then; the site only stores a hash, so it can't show it again.
+- **Regenerate** replaces it (the old one stops working immediately). **Revoke** deletes it. The Account page also shows when it was created and last used.
+- Changing your password does *not* change your key. Regenerate it if you think it leaked.
+- A key can only *read* (everything under `/v1` is `GET`), and it never works on the website itself.
+
+Send it in either of these ways:
 
 ```bash
-curl -u 5054251001:your-password https://tracker.example.com/v1/due
+# Bearer token (the key already identifies you, no NRP needed)
+curl -H "Authorization: Bearer trk_xxxxxxxx" https://tracker.example.com/v1/due
+
+# or HTTP Basic: NRP as the username, the key as the password
+curl -u 5054251001:trk_xxxxxxxx https://tracker.example.com/v1/due
 ```
 
-An NRP on its own is not a secret (everyone in the class has the list), so it is never enough by itself.
+With Basic, the NRP has to match the key's owner or you get `401`.
 
-- Accounts still on the default password are refused with `403` — log in on the website and change it first.
-- After **10 wrong passwords within 5 minutes** for the same NRP from the same address, further attempts get `429` with a `Retry-After` header (seconds), even if the password is then correct.
-- Treat the password like any other secret: keep it in an environment variable or secret store, not in code you commit.
+An NRP on its own is never enough: NRPs aren't secret, so a request with no key is refused. Your website password isn't accepted by the API at all, so scripts never need it.
+
+- Accounts still on the default password get `403` (they can't open the Account page anyway until they've changed it).
+- After **10 wrong keys within 5 minutes** for the same NRP from the same address (30 if no NRP was sent), further attempts get `429` with a `Retry-After` header (seconds).
+- Treat the key like a password: keep it in an environment variable or secret store, not in code you commit.
 
 The API never uses website cookies, so being logged in in your browser does not affect it. It does not send CORS headers, so it can't be called from another website's JavaScript.
 
@@ -48,7 +61,7 @@ Only `GET` is supported; anything else returns `405`.
 
 | Query param | Meaning |
 |---|---|
-| `status=todo\|done\|all` | `todo` = not done and not older than 14 days overdue; `done` = ticked by you; default `all`. |
+| `status` |  One of `todo` (not done, and not more than 14 days overdue), `done` (ticked by you) or `all`. Default `all`. |
 | `group=ID` | Only this group. |
 
 ### Assignment object
@@ -118,14 +131,14 @@ Only `GET` is supported; anything else returns `405`.
 Every error under `/v1` is JSON, never an HTML page:
 
 ```json
-{ "error": "Wrong NRP or password.", "status": 401 }
+{ "error": "Invalid API key.", "status": 401 }
 ```
 
 | Status | When |
 |---|---|
 | `400` | A query parameter is invalid (`days=abc`, `status=bogus`, …). |
-| `401` | Missing or wrong credentials. Includes `WWW-Authenticate: Basic realm="tracker"`. |
-| `403` | The account is still on the default password. |
+| `401` | Missing or invalid API key. Includes `WWW-Authenticate: Bearer realm="tracker"`. |
+| `403` | The account is back on the default password. |
 | `404` | Unknown path. |
 | `405` | Not a `GET`. |
 | `429` | Too many failed logins. See `Retry-After`. |
@@ -134,16 +147,18 @@ Responses carry `Cache-Control: no-store`.
 
 ## Examples
 
+Put the key in `TRACKER_KEY` first (for example `export TRACKER_KEY=trk_...`).
+
 **curl** — what's due in the next 3 days:
 
 ```bash
-curl -s -u "$TRACKER_NRP:$TRACKER_PASSWORD" "https://tracker.example.com/v1/due?days=3"
+curl -s -H "Authorization: Bearer $TRACKER_KEY" "https://tracker.example.com/v1/due?days=3"
 ```
 
 **curl + jq** — one line per assignment:
 
 ```bash
-curl -s -u "$TRACKER_NRP:$TRACKER_PASSWORD" https://tracker.example.com/v1/due \
+curl -s -H "Authorization: Bearer $TRACKER_KEY" https://tracker.example.com/v1/due \
   | jq -r '.assignments[] | "\(.deadline)  [\(.group.name // "direct")]  \(.title)"'
 ```
 
@@ -155,7 +170,7 @@ import os, requests
 r = requests.get(
     "https://tracker.example.com/v1/due",
     params={"days": 7},
-    auth=(os.environ["TRACKER_NRP"], os.environ["TRACKER_PASSWORD"]),
+    headers={"Authorization": f"Bearer {os.environ['TRACKER_KEY']}"},
     timeout=10,
 )
 r.raise_for_status()
@@ -167,8 +182,9 @@ for a in r.json()["assignments"]:
 **JavaScript (Node 18+)**:
 
 ```js
-const auth = Buffer.from(`${process.env.TRACKER_NRP}:${process.env.TRACKER_PASSWORD}`).toString("base64");
-const res = await fetch("https://tracker.example.com/v1/due", { headers: { Authorization: `Basic ${auth}` } });
+const res = await fetch("https://tracker.example.com/v1/due", {
+  headers: { Authorization: `Bearer ${process.env.TRACKER_KEY}` },
+});
 if (!res.ok) throw new Error((await res.json()).error);
 console.log((await res.json()).assignments.map(a => a.title));
 ```
