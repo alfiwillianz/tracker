@@ -8,6 +8,10 @@
     --soft: #e0e0e0;
     --muted: #888;
     --blue: #4a90e2;
+    --btn-blue: #2e4661;        /* muted blue, same weight as --btn-red */
+    --btn-blue-hover: #305278;
+    --btn-red: #5a2a2a;
+    --btn-red-hover: #7a3030;
     --red: #e06c6c;
     --amber: #e0b44a;
     --green: #3fb27f;
@@ -98,8 +102,8 @@ button, .button {
 }
 button:hover, .button:hover { background-color: #444; text-decoration: none; }
 main a.button { color: white; }
-.button.primary, .form button[type="submit"] { background: var(--blue); }
-.button.primary:hover, .form button[type="submit"]:hover { background: #3a78c0; }
+.button.primary, .form button[type="submit"] { background: var(--btn-blue); }
+.button.primary:hover, .form button[type="submit"]:hover { background: var(--btn-blue-hover); }
 .button-container { display: flex; gap: 10px; flex-wrap: wrap; }
 
 .linkbtn {
@@ -550,8 +554,8 @@ a.group-card .meta { color: var(--muted); }
 .welcome-box.wide { max-width: 560px; }
 
 @media screen and (max-width: 767px) { .radio-cards { grid-template-columns: 1fr; } }
-button.primary { background: var(--blue); }
-button.primary:hover { background: #3a78c0; }
+button.primary { background: var(--btn-blue); }
+button.primary:hover { background: var(--btn-blue-hover); }
 
 /* ---------- styled dropdown (select.js) ---------- */
 .fselect { position: relative; }
@@ -659,8 +663,8 @@ dialog.confirm[open] { animation: confirm-in 0.15s ease-out; }
 .confirm-box p { margin: 0; color: var(--soft); line-height: 1.55; overflow-wrap: anywhere; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 .confirm-actions button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.5); }
-.confirm-actions .ok { background: #b84a4a; }
-.confirm-actions .ok:hover { background: #d05a5a; }
+.confirm-actions .ok { background: var(--btn-red-hover); }
+.confirm-actions .ok:hover { background: #8f3a3a; }
 @media (prefers-reduced-motion: reduce) { dialog.confirm[open] { animation: none; } }
 
 /* ---------- member pager ---------- */
@@ -858,8 +862,8 @@ button.busy::after {
 .keyinfo li:last-child { border-bottom: none; }
 .keyinfo .muted { width: 74px; flex: none; }
 .keyinfo code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #fff; }
-button.small.danger { background: #5a2a2a; }
-button.small.danger:hover { background: #7a3030; }
+button.small.danger { background: var(--btn-red); }
+button.small.danger:hover { background: var(--btn-red-hover); }
 @media screen and (max-width: 767px) { .keyrow { flex-direction: column; align-items: stretch; } }
 
 /* ---------- docs page (rendered markdown) ---------- */
