@@ -33,6 +33,7 @@ App.init(function (scope) {
             box.innerHTML = html;
             box.classList.remove('loading');
             history[mode + 'State'](history.state, '', url.pathname + url.search + url.hash);
+            if (App.synced) App.synced();
         }).catch(function (err) {
             if (err && err.name === 'AbortError') return;
             location.href = url.href;                                  // fall back to a full page load

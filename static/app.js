@@ -5,6 +5,7 @@
     'use strict';
 
     var seq = 0, controller = null, bar = null, toasts = null;
+    var last = location.href;           // the URL the page was last in sync with (see popstate below)
     var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
@@ -14,7 +15,8 @@
         init: function (fn) { this._inits.push(fn); fn(document); },
         run: function (root) { this._inits.forEach(function (fn) { fn(root); }); },
         go: function (url) { navigate(url, {}); },
-        toast: toast
+        toast: toast,
+        synced: function () { last = location.href; }   // call after changing the URL yourself (members.js does)
     };
 
     // ---- progress bar ----
@@ -144,6 +146,7 @@
             if (!sameDoc(target, here) || target.hash !== here.hash) history.pushState({ y: 0 }, '', target.pathname + target.search + target.hash);
         }
 
+        last = location.href;
         App.run(adopted);
 
         var anchor = target.hash && document.getElementById(decodeURIComponent(target.hash.slice(1)));
@@ -206,7 +209,15 @@
     });
 
     // ---- back / forward ----
+    // Clicking an in-page #anchor also fires popstate. That is not a page change: the browser has already
+    // scrolled, and re-fetching would throw away the page state (and cancel any request in flight).
+    // (A link to the exact URL you're already on does the same in Chrome.) Same path + query = same page.
+    function samePage(a, b) {
+        a = new URL(a); b = new URL(b);
+        return a.pathname === b.pathname && a.search === b.search;
+    }
     window.addEventListener('popstate', function (e) {
+        if (samePage(last, location.href)) { last = location.href; return; }
         navigate(location.href, { push: false, restoreY: e.state && e.state.y });
     });
 })();
