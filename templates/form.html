@@ -11,10 +11,10 @@
     <div>
         <label class="muted" for="group">Group/Course</label>
         <select id="group" name="group" data-fancy data-filter>
+            <option value="" {{ 'selected' if not a.get('group_id') }}>Just me · no group</option>
             {% for g in groups %}
             <option value="{{ g.id }}" {{ 'selected' if g.id == a.get('group_id') }}>{{ g.name }}</option>
             {% endfor %}
-            <option value="" {{ 'selected' if not a.get('group_id') and a.get('group_id') is not none }}>No group · only the people below</option>
         </select>
     </div>
     <details class="picker-toggle" {{ 'open' if a.get('recipients') }}>

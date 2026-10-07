@@ -317,10 +317,6 @@ def my_groups():
     ).fetchall()
 
 
-def default_group_id():
-    return db().execute("SELECT id FROM class_groups WHERE is_default = 1").fetchone()["id"]
-
-
 def can_view(aid):
     return db().execute(
         f"SELECT 1 FROM assignments a WHERE a.id = :id AND {VISIBLE_SQL}",
@@ -370,8 +366,6 @@ def form_fields(allowed_groups):
     recipients, unknown = parse_nrps(nrps_text)
     if unknown:
         errors.append("Unknown NRP: " + ", ".join(unknown))
-    if group_id is None and not recipients and not errors:
-        errors.append("Pick a group or add at least one NRP.")
     if not title:
         errors.append("Title is required.")
     deadline = ""
@@ -632,7 +626,7 @@ def add():
         db().commit()
         return redirect(url_for("index", group=data["group_id"] or None))
     wanted = request.args.get("group", type=int)
-    gid = wanted if wanted in {g["id"] for g in groups} else default_group_id()
+    gid = wanted if wanted in {g["id"] for g in groups} else None  # solo unless a group is asked for
     return render_template("form.html", a={"group_id": gid}, editing=False, groups=groups,
                            people=people({current_user()}))
 
