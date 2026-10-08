@@ -72,6 +72,7 @@ Only `GET` is supported; anything else returns `405`.
   "title": "Homework 2",
   "description": "Chapters 3-4",
   "link": "https://example.com/hw2",
+  "submit_link": "https://example.com/hw2/submit",
   "deadline": "2026-10-07T23:59:00+07:00",
   "due_in_seconds": 90945,
   "overdue": false,
@@ -86,7 +87,8 @@ Only `GET` is supported; anything else returns `405`.
 |---|---|
 | `deadline` | ISO 8601 **with the UTC offset** of the server (Asia/Jakarta, `+07:00`). Parse it as a timezone-aware datetime. |
 | `due_in_seconds` | Seconds from now to the deadline; **negative when overdue**. |
-| `link` | `null` when there is none. |
+| `link` | The assignment's page; `null` when there is none. |
+| `submit_link` | Where to hand it in; `null` when there is none. |
 | `group` | `null` for assignments shared only by NRP. |
 | `created_by.name` | `null` if the name list doesn't have that NRP. |
 

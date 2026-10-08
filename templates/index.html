@@ -62,7 +62,10 @@
             <p class="desc">{{ a.description }}</p>
             {% endif %}
         {% endif %}
-        {% if a.link %}<p class="link"><a href="{{ a.link }}" target="_blank" rel="noopener noreferrer">{{ a.link|replace('https://', '')|replace('http://', '')|truncate(60, True) }} ↗</a></p>{% endif %}
+        {% if a.link or a.submit_link %}<p class="link">
+            {% if a.link %}<a href="{{ a.link }}" target="_blank" rel="noopener noreferrer" title="{{ a.link }}">Assignment ↗</a>{% endif %}
+            {% if a.submit_link %}<a href="{{ a.submit_link }}" target="_blank" rel="noopener noreferrer" title="{{ a.submit_link }}">Submit ↗</a>{% endif %}
+        </p>{% endif %}
         {% if a.created_by == me or a.can_delete %}
         <div class="actions">
             {% if a.created_by == me %}<a href="{{ url_for('edit', aid=a.id) }}">Edit</a>{% endif %}

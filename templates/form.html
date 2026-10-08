@@ -21,7 +21,8 @@
         <summary>Also add people <span class="badge" data-badge></span></summary>
         {{ picker('nrps', people, a.get('recipients', [])) }}
     </details>
-    <input type="text" name="link" placeholder="Link (optional)" maxlength="500" value="{{ a.get('link', '') }}">
+    <input type="text" name="link" placeholder="Assignment link (optional)" maxlength="500" value="{{ a.get('link', '') }}">
+    <input type="text" name="submit_link" placeholder="Submission link (optional)" maxlength="500" value="{{ a.get('submit_link', '') }}">
     <div class="row">
         <div>
             <label class="muted" for="date">Deadline date</label>

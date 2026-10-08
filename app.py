@@ -101,6 +101,7 @@ def init_db():
             title TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
             link TEXT NOT NULL DEFAULT '',
+            submit_link TEXT NOT NULL DEFAULT '',
             deadline TEXT NOT NULL,
             created_by TEXT NOT NULL REFERENCES users(nrp),
             created_at TEXT NOT NULL,
@@ -153,6 +154,8 @@ def init_db():
                      [(name, nrp) for nrp, name in load_students().items()])
     # migrate DBs created before groups existed
     migrated = "group_id" not in [r[1] for r in conn.execute("PRAGMA table_info(assignments)")]
+    if "submit_link" not in [r[1] for r in conn.execute("PRAGMA table_info(assignments)")]:
+        conn.execute("ALTER TABLE assignments ADD COLUMN submit_link TEXT NOT NULL DEFAULT ''")
     if migrated:
         conn.execute("ALTER TABLE assignments ADD COLUMN group_id INTEGER REFERENCES class_groups(id)")
     rka = conn.execute("SELECT id FROM class_groups WHERE is_default = 1").fetchone()
@@ -354,6 +357,7 @@ def form_fields(allowed_groups):
     title = request.form.get("title", "").strip()[:150]
     description = request.form.get("description", "").strip()[:2000]
     link = clean_link(request.form.get("link"))
+    submit_link = clean_link(request.form.get("submit_link"))
     date = request.form.get("date", "").strip()
     time = request.form.get("time", "").strip()
     errors = []
@@ -379,7 +383,7 @@ def form_fields(allowed_groups):
     except ValueError:
         errors.append("Pick a deadline date.")
     return dict(title=title, description=description,
-                link=link, deadline=deadline, date=date, time=time,
+                link=link, submit_link=submit_link, deadline=deadline, date=date, time=time,
                 group_id=group_id, nrps=nrps_text, recipients=recipients), errors
 
 
@@ -618,8 +622,8 @@ def add():
             return render_template("form.html", a=data, editing=False, groups=groups,
                                    people=people({current_user()}))
         cur = db().execute(
-            """INSERT INTO assignments (title, description, link, deadline, created_by, created_at, group_id)
-               VALUES (:title, :description, :link, :deadline, :by, :at, :group_id)""",
+            """INSERT INTO assignments (title, description, link, submit_link, deadline, created_by, created_at, group_id)
+               VALUES (:title, :description, :link, :submit_link, :deadline, :by, :at, :group_id)""",
             {**data, "by": current_user(), "at": datetime.now().isoformat(timespec="seconds")},
         )
         save_recipients(cur.lastrowid, data["recipients"])
@@ -655,7 +659,7 @@ def edit(aid):
                                    people=people({current_user()}))
         db().execute(
             """UPDATE assignments SET title=:title, description=:description,
-               link=:link, deadline=:deadline, group_id=:group_id WHERE id=:id""",
+               link=:link, submit_link=:submit_link, deadline=:deadline, group_id=:group_id WHERE id=:id""",
             {**data, "id": aid},
         )
         save_recipients(aid, data["recipients"])
@@ -1089,6 +1093,7 @@ def api_assignment(i):
         "title": i["title"],
         "description": i["description"],
         "link": i["link"] or None,
+        "submit_link": i["submit_link"] or None,
         "deadline": i["dl"].astimezone().isoformat(timespec="seconds"),  # local server time, with UTC offset
         "due_in_seconds": int(i["delta"]),                                # negative = overdue
         "overdue": i["overdue"],

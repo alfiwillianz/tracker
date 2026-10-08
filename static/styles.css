@@ -237,6 +237,7 @@ details.desc summary::after { content: " more"; color: var(--blue); }
 details.desc[open] summary { display: none; }
 details.desc p { margin: 0; white-space: pre-wrap; }
 .link { margin: 8px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+.link a + a { margin-left: 14px; }
 
 .actions { display: flex; gap: 14px; margin-top: 10px; font-size: 13px; }
 .actions a { color: #888 !important; }
