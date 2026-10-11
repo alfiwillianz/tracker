@@ -3,7 +3,10 @@ import os
 import re
 import secrets
 import sqlite3
+import threading
 import time
+import json
+import urllib.request
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -132,6 +135,12 @@ def init_db():
             hint TEXT NOT NULL,
             created_at TEXT NOT NULL,
             last_used_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS reminders_sent (
+            assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+            deadline TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            PRIMARY KEY (assignment_id, deadline, kind)
         );
         CREATE TABLE IF NOT EXISTS completions (
             nrp TEXT NOT NULL REFERENCES users(nrp),
@@ -1197,6 +1206,84 @@ def api_groups():
     return jsonify(user=api_person(g.api_nrp), count=len(rows), groups=[
         {"id": r["id"], "name": r["name"], "public": bool(r["is_public"]), "admin": bool(r["is_admin"]),
          "members": r["members"], "assignments": r["assignments"]} for r in rows])
+
+
+# ---------- reminders (webhook) ----------
+
+WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "").strip().rstrip("/")
+WEBHOOK_ROOM_ID = os.environ.get("WEBHOOK_ROOM_ID", "").strip()
+WEBHOOK_API_KEY = os.environ.get("WEBHOOK_API_KEY", "").strip()
+REMINDER_GROUPS = {n.lower() for n in (
+    "Data Mining", "Keamanan Informasi", "Kecerdasan Komputasional", "Machine Learning",
+    "Pemrograman Berbasis Object", "Perancangan dan Analisis Algoritma")}
+REMINDERS = [("D-1", timedelta(days=1)), ("D-12H", timedelta(hours=12)), ("D-1H", timedelta(hours=1))]  # longest first
+
+
+def send_webhook(text):
+    base = WEBHOOK_BASE_URL if "://" in WEBHOOK_BASE_URL else "http://" + WEBHOOK_BASE_URL
+    req = urllib.request.Request(
+        base + "/api/send",
+        data=json.dumps({"room": WEBHOOK_ROOM_ID, "text": text}).encode(),
+        headers={"Authorization": f"Bearer {WEBHOOK_API_KEY}", "Content-Type": "application/json"},
+    )
+    urllib.request.urlopen(req, timeout=10).close()
+
+
+def reminder_text(kind, a):
+    left = {"D-1": "1 day", "D-12H": "12 hours", "D-1H": "1 hour"}[kind]
+    lines = [f"[{a['group_name']}] {a['title']} is due in {left}",
+             f"Deadline: {a['deadline'].replace('T', ' ')}"]
+    if a["link"]:
+        lines.append(f"Assignment: {a['link']}")
+    if a["submit_link"]:
+        lines.append(f"Submit: {a['submit_link']}")
+    return "\n".join(lines)
+
+
+def check_reminders():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        now = datetime.now()
+        rows = conn.execute("""SELECT a.*, gr.name AS group_name FROM assignments a
+                               JOIN class_groups gr ON gr.id = a.group_id""").fetchall()
+        for a in rows:
+            dl = parse_deadline(a["deadline"])
+            if a["group_name"].strip().lower() not in REMINDER_GROUPS or dl is None or dl <= now:
+                continue
+            # the tightest window we're inside; looser ones are skipped, not sent late together
+            due = [k for k, off in REMINDERS if now >= dl - off]
+            if not due:
+                continue
+            key = (a["id"], a["deadline"])
+            sent = {r[0] for r in conn.execute(
+                "SELECT kind FROM reminders_sent WHERE assignment_id = ? AND deadline = ?", key)}
+            kind = due[-1]
+            if kind in sent:
+                continue
+            try:
+                send_webhook(reminder_text(kind, a))
+            except Exception as e:
+                print(f"reminder failed ({a['id']} {kind}): {e}", flush=True)
+                continue
+            conn.executemany("INSERT OR IGNORE INTO reminders_sent VALUES (?, ?, ?)",
+                             [(*key, k) for k in due])
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def reminder_loop():
+    while True:
+        try:
+            check_reminders()
+        except Exception as e:
+            print(f"reminder loop error: {e}", flush=True)
+        time.sleep(60)
+
+
+if WEBHOOK_BASE_URL and WEBHOOK_ROOM_ID and WEBHOOK_API_KEY:
+    threading.Thread(target=reminder_loop, daemon=True).start()
 
 
 if __name__ == "__main__":

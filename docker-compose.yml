@@ -3,6 +3,7 @@ services:
     build: .
     container_name: tracker
     restart: unless-stopped
+    env_file: .env
     environment:
       - TZ=Asia/Jakarta
       - TRUST_PROXY=1
