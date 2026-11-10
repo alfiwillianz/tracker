@@ -1,3 +1,4 @@
+import calendar as pycal
 import hashlib
 import os
 import re
@@ -273,7 +274,8 @@ def bust_static_cache(endpoint, values):
 @app.after_request
 def headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["X-Frame-Options"] = "DENY"
+    if request.endpoint != "calendar":
+        resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "same-origin"
     return resp
 
@@ -320,12 +322,12 @@ VISIBLE_SQL = """(a.created_by = :me
     OR a.id IN (SELECT assignment_id FROM assignment_recipients WHERE nrp = :me))"""
 
 
-def my_groups():
+def my_groups(nrp=None):
     return db().execute(
         """SELECT g.* FROM class_groups g
            JOIN group_members m ON m.group_id = g.id AND m.nrp = ?
            ORDER BY g.is_default DESC, g.name COLLATE NOCASE""",
-        (current_user(),),
+        (nrp or current_user(),),
     ).fetchall()
 
 
@@ -609,6 +611,87 @@ def index():
     return render_template("index.html", groups=groups, view=view,
                            stats=stats, counts=counts, total=len(items),
                            mygroups=mygroups, group=gid or 0)
+
+
+@app.route("/calendar")
+def calendar():
+    nrp = current_user()
+    raw_key = request.args.get("key", "").strip()
+    if not nrp and raw_key:
+        row = db().execute(
+            "SELECT k.nrp FROM api_keys k JOIN users u ON u.nrp = k.nrp WHERE k.key_hash = ? AND u.must_change = 0",
+            (key_hash(raw_key),),
+        ).fetchone()
+        if row:
+            nrp = row["nrp"]
+    if not nrp:
+        return redirect(url_for("login"))
+
+    mygroups = my_groups(nrp)
+    gid = request.args.get("group", type=int)
+    if gid not in {g["id"] for g in mygroups}:
+        gid = None
+    now = datetime.now()
+    today = now.date()
+    year = request.args.get("year", today.year, type=int)
+    month = request.args.get("month", today.month, type=int)
+    if not (2000 <= year <= 2100):
+        year = today.year
+    if not (1 <= month <= 12):
+        month = today.month
+
+    items = visible_assignments(nrp, gid)
+    by_day = {}
+    for i in items:
+        if i["dl"]:
+            by_day.setdefault(i["dl"].date(), []).append(i)
+
+    cal = pycal.Calendar(firstweekday=0)
+    weeks = []
+    for week in cal.monthdatescalendar(year, month):
+        row = []
+        for d in week:
+            day_items = by_day.get(d, [])
+            tone = ""
+            if day_items:
+                if any(a["tone"] == "bad" for a in day_items):
+                    tone = "bad"
+                elif any(a["tone"] == "warn" for a in day_items):
+                    tone = "warn"
+                elif all(a["done"] for a in day_items):
+                    tone = "done"
+            row.append({
+                "date": d,
+                "day": d.day,
+                "in_month": d.month == month,
+                "is_today": d == today,
+                "rows": day_items,
+                "count": len(day_items),
+                "tone": tone,
+            })
+        weeks.append(row)
+
+    prev_y, prev_m = (year - 1, 12) if month == 1 else (year, month - 1)
+    next_y, next_m = (year + 1, 1) if month == 12 else (year, month + 1)
+    month_label = datetime(year, month, 1).strftime("%B %Y")
+    month_count = sum(len(by_day.get(d, [])) for w in weeks for c in w for d in [c["date"]] if c["in_month"])
+
+    return render_template(
+        "calendar.html",
+        weeks=weeks,
+        year=year,
+        month=month,
+        month_label=month_label,
+        month_count=month_count,
+        prev_y=prev_y,
+        prev_m=prev_m,
+        next_y=next_y,
+        next_m=next_m,
+        is_current_month=(year == today.year and month == today.month),
+        mygroups=mygroups,
+        group=gid or 0,
+        key=raw_key or None,
+    )
 
 
 def save_recipients(aid, recipients):
@@ -1222,7 +1305,7 @@ REMINDERS = [("D-1", timedelta(days=1)), ("D-12H", timedelta(hours=12)), ("D-1H"
 def send_webhook(text):
     base = WEBHOOK_BASE_URL if "://" in WEBHOOK_BASE_URL else "http://" + WEBHOOK_BASE_URL
     req = urllib.request.Request(
-        base + "/api/send",
+        base + "/v1/send",
         data=json.dumps({"room": WEBHOOK_ROOM_ID, "text": text}).encode(),
         headers={"Authorization": f"Bearer {WEBHOOK_API_KEY}", "Content-Type": "application/json"},
     )

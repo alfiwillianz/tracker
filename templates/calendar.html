@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231e1e1e'/%3E%3Ctext x='32' y='44' font-family='sans-serif' font-size='40' font-weight='700' text-anchor='middle' fill='%234a90e2'%3Et;%3C/text%3E%3C/svg%3E">
+    <title>{{ month_label }} - tracker</title>
+</head>
+<body class="cal-embed">
+<main class="cal-widget">
+    <div class="cal-card project-tile">
+        <div class="cal-bar">
+            <div class="cal-title">
+                <b>{{ month_label }}</b>
+                <span class="muted">{{ month_count }} due</span>
+            </div>
+            <div class="cal-nav">
+                {% if not is_current_month %}
+                <a href="{{ url_for('calendar', group=group or None, key=key) }}" class="button small ghost">Today</a>
+                {% endif %}
+                <a href="{{ url_for('calendar', year=prev_y, month=prev_m, group=group or None, key=key) }}" class="button small cal-arrow" aria-label="Previous month" title="Previous month">‹</a>
+                <a href="{{ url_for('calendar', year=next_y, month=next_m, group=group or None, key=key) }}" class="button small cal-arrow" aria-label="Next month" title="Next month">›</a>
+            </div>
+        </div>
+
+        <div class="cal-weekdays">
+            {% for wd in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+            <div>{{ wd }}</div>
+            {% endfor %}
+        </div>
+        <div class="cal-grid">
+            {% for week in weeks %}
+            {% set widx = loop.index0 %}
+            {% for cell in week %}
+            {% set cidx = loop.index0 %}
+            <div class="cal-cell {{ 'outside' if not cell.in_month }} {{ 'today' if cell.is_today }} {{ 'has-items ' + cell.tone if cell.count }}" {% if cell.count %}tabindex="0"{% endif %}>
+                <div class="cal-day-top">
+                    <span class="cal-num">{{ cell.day }}</span>
+                    {% if cell.is_today %}<span class="cal-today-tag">Today</span>{% endif %}
+                </div>
+                {% if cell.count %}
+                <div class="cal-badge pill {{ cell.tone }}">
+                    <b>{{ cell.count }}</b> <span>due</span>
+                </div>
+                <div class="cal-dots" aria-hidden="true">
+                    {% for a in cell.rows[:5] %}
+                    <i class="cal-dot {{ a.tone }}"></i>
+                    {% endfor %}
+                </div>
+                <div class="cal-pop {{ 'pop-left' if cidx <= 1 else ('pop-right' if cidx >= 5 else '') }} {{ 'pop-up' if widx >= (weeks|length - 2) else '' }}">
+                    <div class="cal-pop-head">
+                        <b>{{ cell.date.strftime('%a, %d %b %Y') }}</b>
+                        <span class="pill {{ cell.tone }}">{{ cell.count }} assignment{{ '' if cell.count == 1 else 's' }}</span>
+                    </div>
+                    <ul class="cal-pop-list">
+                        {% for a in cell.rows %}
+                        <li class="cal-pop-item {{ a.tone }}">
+                            <div class="cal-pop-row">
+                                <span class="cal-pop-title">{{ a.title }}</span>
+                                <span class="pill {{ a.tone }}">{{ 'Done' if a.done else a.dl.strftime('%H:%M') }}</span>
+                            </div>
+                            <div class="cal-pop-meta">
+                                {% if a.group_name %}<span class="chip small">{{ a.group_name }}</span>
+                                {% else %}<span class="chip small grp">direct</span>{% endif %}
+                                <span>{{ 'completed' if a.done else ('due ' + a.dl.strftime('%H:%M') + ' · ' + a.rel) }}</span>
+                            </div>
+                            {% if a.link or a.submit_link %}
+                            <div class="cal-pop-links">
+                                {% if a.link %}<a href="{{ a.link }}" target="_blank" rel="noopener noreferrer">Assignment ↗</a>{% endif %}
+                                {% if a.submit_link %}<a href="{{ a.submit_link }}" target="_blank" rel="noopener noreferrer">Submit ↗</a>{% endif %}
+                            </div>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% endfor %}
+        </div>
+    </div>
+</main>
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>
